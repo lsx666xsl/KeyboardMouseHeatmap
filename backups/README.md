@@ -19,7 +19,7 @@
 ## 当前备份
 
 - [x] 规划阶段快照：`backups/2026-09-04-planning.zip`
-- [ ] Tauri 基础工程快照
+- [x] Tauri 基础工程/可视化原型快照：`backups/2026-09-04-tauri-prototype.zip`
 - [ ] 输入监听阶段快照
 - [ ] MVP 完成快照
 
