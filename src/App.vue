@@ -1,12 +1,25 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
+import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 type KeyItem = { id: string; label: string; count: number; width?: number; muted?: boolean };
 type MouseStat = { label: string; value: number; color: string };
+type DashboardData = {
+  date: string;
+  totalKeyPresses: number;
+  totalMouseActions: number;
+  keys: Array<{ keyId: string; label: string; count: number }>;
+  mouse: Array<{ actionId: string; label: string; count: number }>;
+  activity: Array<{ hour: number; count: number }>;
+};
 
 const ranges = ["今天", "本周", "本月"];
 const activeRange = ref("今天");
 const recording = ref(true);
+const liveDashboard = ref<DashboardData | null>(null);
+const demoMode = ref(true);
+let stopStatsListener: UnlistenFn | undefined;
 
 const keyboardRows: KeyItem[][] = [
   ["Esc", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"].map((label, index) => ({ id: label, label, count: [122, 84, 96, 44, 58, 278, 65, 72, 51, 40, 32, 29, 20][index], muted: true })),
@@ -27,18 +40,57 @@ const keyboardRows: KeyItem[][] = [
   ].map(([label, count, width], index) => ({ id: `${label}-${index}`, label: String(label), count: Number(count), width: Number(width) || undefined, muted: label === "Fn" || label === "Menu" })),
 ];
 
-const mouseStats: MouseStat[] = [
+const demoMouseStats: MouseStat[] = [
   { label: "左键", value: 4832, color: "#ff5c7a" },
   { label: "右键", value: 812, color: "#a78bfa" },
   { label: "滚轮", value: 1204, color: "#34d9ff" },
   { label: "侧键", value: 208, color: "#2de2a6" },
 ];
-const hourlyActivity = [32, 48, 26, 18, 12, 22, 45, 72, 88, 64, 76, 94, 82, 68, 74, 91, 100, 86, 60, 44, 36, 30, 22, 16];
-const allKeys = computed(() => keyboardRows.flat());
+const demoHourlyActivity = [32, 48, 26, 18, 12, 22, 45, 72, 88, 64, 76, 94, 82, 68, 74, 91, 100, 86, 60, 44, 36, 30, 22, 16];
+
+function backendKeyId(key: KeyItem) {
+  const aliases: Record<string, string> = {
+    Esc: "escape", "⌫": "backspace", Tab: "tab", Enter: "enter", Space: "space",
+    "~": "backquote", "-": "minus", "=": "equal", "[": "bracket-left", "]": "bracket-right",
+    "\\": "backslash", ";": "semicolon", "'": "quote", ",": "comma", ".": "period", "/": "slash",
+  };
+  if (key.id === "Shift-0") return "shift-left";
+  if (key.id === "Shift-11") return "shift-right";
+  if (key.id === "Ctrl-0") return "ctrl-left";
+  if (key.id === "Ctrl-6") return "ctrl-right";
+  if (key.id === "Alt-1") return "alt-left";
+  if (key.id === "Alt-3") return "alt-right";
+  if (key.id.startsWith("F")) return key.id.toLowerCase();
+  return aliases[key.id] ?? key.id.toLowerCase();
+}
+
+function keyCount(key: KeyItem) {
+  const liveKey = liveDashboard.value?.keys.find((item) => item.keyId === backendKeyId(key));
+  return liveKey?.count ?? (demoMode.value ? key.count : 0);
+}
+
+const allKeys = computed(() => keyboardRows.flat().map((key) => ({ ...key, count: keyCount(key) })));
 const totalKeyPresses = computed(() => allKeys.value.reduce((sum, key) => sum + key.count, 0));
-const totalMouseActions = computed(() => mouseStats.reduce((sum, item) => sum + item.value, 0));
+const mouseStats = computed<MouseStat[]>(() => {
+  if (demoMode.value || !liveDashboard.value) return demoMouseStats;
+  const countFor = (ids: string[]) => liveDashboard.value?.mouse.filter((item) => ids.includes(item.actionId)).reduce((sum, item) => sum + item.count, 0) ?? 0;
+  return [
+    { label: "左键", value: countFor(["left-click"]), color: "#ff5c7a" },
+    { label: "右键", value: countFor(["right-click"]), color: "#a78bfa" },
+    { label: "滚轮", value: countFor(["wheel-up", "wheel-down", "wheel-left", "wheel-right"]), color: "#34d9ff" },
+    { label: "侧键", value: countFor(["x-button-1", "x-button-2"]), color: "#2de2a6" },
+  ];
+});
+const totalMouseActions = computed(() => mouseStats.value.reduce((sum, item) => sum + item.value, 0));
 const topKeys = computed(() => [...allKeys.value].sort((a, b) => b.count - a.count).slice(0, 4));
-const maxKeyCount = computed(() => Math.max(...allKeys.value.map((key) => key.count)));
+const champion = computed(() => topKeys.value.find((key) => key.count > 0) ?? null);
+const maxKeyCount = computed(() => Math.max(1, ...allKeys.value.map((key) => key.count)));
+const hourlyActivity = computed(() => {
+  const source = demoMode.value || !liveDashboard.value ? demoHourlyActivity : liveDashboard.value.activity.map((item) => item.count);
+  const max = Math.max(1, ...source);
+  return source.map((value) => Math.round((value / max) * 100));
+});
+const peakHour = computed(() => hourlyActivity.value.indexOf(Math.max(...hourlyActivity.value)));
 
 function formatNumber(value: number) { return value.toLocaleString("zh-CN"); }
 function heatColor(count: number) {
@@ -49,6 +101,37 @@ function heatLevel(count: number) {
   const ratio = count / maxKeyCount.value;
   return ratio > 0.65 ? "hot" : ratio > 0.28 ? "warm" : "cool";
 }
+
+async function connectToRuntime() {
+  try {
+    const [snapshot, currentRecording] = await Promise.all([
+      invoke<DashboardData>("get_dashboard"),
+      invoke<boolean>("get_recording"),
+    ]);
+    liveDashboard.value = snapshot;
+    demoMode.value = false;
+    recording.value = currentRecording;
+    stopStatsListener = await listen<DashboardData>("stats-updated", (event) => {
+      liveDashboard.value = event.payload;
+    });
+  } catch (error) {
+    // `npm run dev` runs outside Tauri, so keeping the preview data is intentional.
+    console.info("KeyPulse runtime is not connected; showing preview data.", error);
+  }
+}
+
+async function toggleRecording() {
+  const nextValue = !recording.value;
+  try {
+    await invoke("set_recording", { enabled: nextValue });
+  } catch {
+    // The browser-only preview still lets the control be explored.
+  }
+  recording.value = nextValue;
+}
+
+onMounted(connectToRuntime);
+onUnmounted(() => stopStatsListener?.());
 </script>
 
 <template>
@@ -60,8 +143,8 @@ function heatLevel(count: number) {
         <div><p class="eyebrow">PERSONAL INPUT LAB</p><h1>Key<span>Pulse</span></h1></div>
       </div>
       <div class="topbar-actions">
-        <div class="demo-chip"><i></i> 演示数据</div>
-        <button class="record-button" :class="{ paused: !recording }" @click="recording = !recording"><span class="record-dot"></span>{{ recording ? "正在记录" : "已暂停" }}</button>
+        <div class="demo-chip"><i></i> {{ demoMode ? "演示数据" : "本地实时数据" }}</div>
+        <button class="record-button" :class="{ paused: !recording }" @click="toggleRecording"><span class="record-dot"></span>{{ recording ? "正在记录" : "已暂停" }}</button>
         <button class="avatar-button">KP</button>
       </div>
     </header>
@@ -77,7 +160,7 @@ function heatLevel(count: number) {
       <article class="stat-card stat-card-primary"><div class="card-icon icon-spark">✦</div><p>总按键数</p><strong>{{ formatNumber(totalKeyPresses) }}</strong><span class="trend up">↗ 12.8% <small>对比昨日</small></span></article>
       <article class="stat-card"><div class="card-icon icon-mouse">●</div><p>鼠标操作</p><strong>{{ formatNumber(totalMouseActions) }}</strong><span class="trend up">↗ 8.4% <small>对比昨日</small></span></article>
       <article class="stat-card"><div class="card-icon icon-time">◷</div><p>活跃时长</p><strong>5<span class="unit">h</span> 12<span class="unit">m</span></strong><span class="trend neutral">⌁ 分布在 9 个时段</span></article>
-      <article class="stat-card highlight-card"><div class="card-icon icon-top">♛</div><p>今日冠军</p><strong>Space</strong><span class="trend accent-text">{{ formatNumber(8420) }} 次按下</span></article>
+      <article class="stat-card highlight-card"><div class="card-icon icon-top">♛</div><p>今日冠军</p><strong>{{ champion?.label ?? "暂无" }}</strong><span class="trend accent-text">{{ formatNumber(champion?.count ?? 0) }} 次按下</span></article>
     </section>
 
     <section class="content-grid">
@@ -85,10 +168,10 @@ function heatLevel(count: number) {
         <div class="panel-heading"><div><p class="eyebrow">KEYBOARD MAP</p><h3>键盘热力图</h3></div><div class="legend"><span class="legend-gradient"></span><small>低</small><small>高</small></div></div>
         <div class="keyboard-wrap">
           <div v-for="(row, rowIndex) in keyboardRows" :key="rowIndex" class="keyboard-row">
-            <div v-for="key in row" :key="key.id" class="keycap" :class="[heatLevel(key.count), { muted: key.muted }]" :style="{ flex: `${key.width ?? 1} 1 0`, '--key-color': heatColor(key.count) }" :title="`${key.label}：${formatNumber(key.count)} 次`"><span>{{ key.label }}</span><b>{{ formatNumber(key.count) }}</b></div>
+            <div v-for="key in row" :key="key.id" class="keycap" :class="[heatLevel(keyCount(key)), { muted: key.muted }]" :style="{ flex: `${key.width ?? 1} 1 0`, '--key-color': heatColor(keyCount(key)) }" :title="`${key.label}：${formatNumber(keyCount(key))} 次`"><span>{{ key.label }}</span><b>{{ formatNumber(keyCount(key)) }}</b></div>
           </div>
         </div>
-        <div class="keyboard-footer"><span><i class="live-indicator"></i>数据实时更新中</span><span>按键总量 · {{ formatNumber(totalKeyPresses) }}</span></div>
+        <div class="keyboard-footer"><span><i class="live-indicator"></i>{{ demoMode ? "界面预览数据" : "数据实时更新中" }}</span><span>按键总量 · {{ formatNumber(totalKeyPresses) }}</span></div>
       </article>
 
       <div class="side-column">
@@ -103,7 +186,7 @@ function heatLevel(count: number) {
       </div>
     </section>
 
-    <section class="panel timeline-panel"><div class="panel-heading compact"><div><p class="eyebrow">ACTIVITY PULSE · {{ activeRange }}</p><h3>一天中的活跃节奏</h3></div><span class="timeline-note">峰值时段 <b>16:00</b></span></div><div class="timeline-chart"><div class="chart-grid-lines"><i></i><i></i><i></i><i></i></div><div v-for="(value, hour) in hourlyActivity" :key="hour" class="chart-column"><div class="chart-bar" :style="{ height: `${value}%` }"><span>{{ value }}</span></div><small v-if="hour % 3 === 0">{{ String(hour).padStart(2, "0") }}:00</small></div></div></section>
+    <section class="panel timeline-panel"><div class="panel-heading compact"><div><p class="eyebrow">ACTIVITY PULSE · {{ activeRange }}</p><h3>一天中的活跃节奏</h3></div><span class="timeline-note">峰值时段 <b>{{ String(peakHour).padStart(2, "0") }}:00</b></span></div><div class="timeline-chart"><div class="chart-grid-lines"><i></i><i></i><i></i><i></i></div><div v-for="(value, hour) in hourlyActivity" :key="hour" class="chart-column"><div class="chart-bar" :style="{ height: `${value}%` }"><span>{{ value }}</span></div><small v-if="hour % 3 === 0">{{ String(hour).padStart(2, "0") }}:00</small></div></div></section>
     <footer class="footer-note"><span>KeyPulse · offline by design</span><span>隐私优先 · 只保存聚合统计，不保存输入文本</span></footer>
   </main>
 </template>

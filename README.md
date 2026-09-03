@@ -36,8 +36,8 @@ KeyPulse 是一个 Windows 优先、离线运行的键盘和鼠标使用统计�
     <tr><td>项目规划</td><td>✅ 已完成</td><td>需求、架构、开发流程和交接规范已建立</td></tr>
     <tr><td>阶段备份</td><td>✅ 已完成</td><td>已生成规划阶段快照</td></tr>
     <tr><td>Tauri 基础工程</td><td>🔄 进行中</td><td>前端、Rust 测试和 release exe 已通过，安装包收尾遇到环境错误</td></tr>
-    <tr><td>输入监听</td><td>⬜ 待开始</td><td>计划使用 Windows 原生 API + Rust</td></tr>
-    <tr><td>热力图界面</td><td>🔄 原型完成</td><td>已完成键盘/鼠标模板、数据卡片和趋势柱状图演示页</td></tr>
+    <tr><td>输入监听</td><td>🔄 已实现待验收</td><td>Rust Windows Hook 已完成，默认过滤注入事件和自动重复</td></tr>
+    <tr><td>热力图界面</td><td>🔄 已接入接口</td><td>演示页已连接 SQLite 查询和 stats-updated 实时事件，待人工验收</td></tr>
   </tbody>
 </table>
 
