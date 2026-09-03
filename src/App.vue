@@ -36,7 +36,10 @@ function dateWithOffset(days: number) {
 const maxSelectableDate = formatDateInput(new Date());
 const customStart = ref(dateWithOffset(-6));
 const customEnd = ref(maxSelectableDate);
+const draftStart = ref(customStart.value);
+const draftEnd = ref(customEnd.value);
 const activeRangeLabel = computed(() => activeRange.value === "自定义" ? `${customStart.value} → ${customEnd.value}` : activeRange.value);
+const rangeHeading = computed(() => activeRange.value === "自定义" ? "选定范围" : activeRange.value);
 const recording = ref(true);
 const liveDashboard = ref<DashboardData | null>(null);
 const demoMode = ref(true);
@@ -92,7 +95,7 @@ function keyCount(key: KeyItem) {
 }
 
 const allKeys = computed(() => keyboardRows.flat().map((key) => ({ ...key, count: keyCount(key) })));
-const totalKeyPresses = computed(() => allKeys.value.reduce((sum, key) => sum + key.count, 0));
+const totalKeyPresses = computed(() => demoMode.value ? allKeys.value.reduce((sum, key) => sum + key.count, 0) : liveDashboard.value?.totalKeyPresses ?? 0);
 const mouseStats = computed<MouseStat[]>(() => {
   if (demoMode.value || !liveDashboard.value) return demoMouseStats;
   const countFor = (ids: string[]) => liveDashboard.value?.mouse.filter((item) => ids.includes(item.actionId)).reduce((sum, item) => sum + item.count, 0) ?? 0;
@@ -112,6 +115,7 @@ const hourlyActivity = computed(() => {
   const max = Math.max(1, ...source);
   return source.map((value) => Math.round((value / max) * 100));
 });
+const activeHours = computed(() => demoMode.value || !liveDashboard.value ? 9 : liveDashboard.value.activity.filter((item) => item.count > 0).length);
 const peakHour = computed(() => hourlyActivity.value.indexOf(Math.max(...hourlyActivity.value)));
 
 function formatNumber(value: number) { return value.toLocaleString("zh-CN"); }
@@ -165,17 +169,28 @@ async function changeRange(range: string) {
   }
 }
 
+function toggleDatePicker() {
+  if (!showDatePicker.value) {
+    draftStart.value = customStart.value;
+    draftEnd.value = customEnd.value;
+    customRangeError.value = "";
+  }
+  showDatePicker.value = !showDatePicker.value;
+}
+
 async function applyCustomRange() {
   customRangeError.value = "";
-  if (!customStart.value || !customEnd.value) {
+  if (!draftStart.value || !draftEnd.value) {
     customRangeError.value = "请选择开始日期和结束日期";
     return;
   }
-  if (customStart.value > customEnd.value) {
+  if (draftStart.value > draftEnd.value) {
     customRangeError.value = "开始日期不能晚于结束日期";
     return;
   }
 
+  customStart.value = draftStart.value;
+  customEnd.value = draftEnd.value;
   activeRange.value = "自定义";
   showDatePicker.value = false;
   if (!demoMode.value) {
@@ -231,15 +246,15 @@ onUnmounted(() => {
     </header>
 
     <section class="hero-row">
-      <div><p class="eyebrow accent">YOUR RHYTHM, VISUALIZED</p><h2>今天的输入节奏<br /><em>比昨天更有力。</em></h2><p class="hero-copy">看见每一次敲击、点击和滚动，找到属于你的数字节奏。</p></div>
+      <div><p class="eyebrow accent">YOUR RHYTHM, VISUALIZED</p><h2>{{ rangeHeading }}的输入节奏<br /><em>每一次动作都算数。</em></h2><p class="hero-copy">看见每一次敲击、点击和滚动，找到属于你的数字节奏。</p></div>
       <div class="range-control">
         <div class="range-switch" role="tablist" aria-label="时间范围">
-          <button v-for="range in ranges" :key="range" :class="{ active: activeRange === range }" @click="changeRange(range)">{{ range }}</button><button class="calendar-button" :class="{ active: activeRange === '自定义' }" aria-label="选择日期" :aria-expanded="showDatePicker" @click="showDatePicker = !showDatePicker">▣</button>
+          <button v-for="range in ranges" :key="range" :class="{ active: activeRange === range }" @click="changeRange(range)">{{ range }}</button><button class="calendar-button" :class="{ active: activeRange === '自定义' }" aria-label="选择日期" :aria-expanded="showDatePicker" @click="toggleDatePicker">▣</button>
         </div>
         <div v-if="showDatePicker" class="date-popover">
           <p class="date-popover-title">自定义时间范围</p>
-          <label>开始日期<input v-model="customStart" type="date" :max="maxSelectableDate" /></label>
-          <label>结束日期<input v-model="customEnd" type="date" :max="maxSelectableDate" /></label>
+          <label>开始日期<input v-model="draftStart" type="date" :max="maxSelectableDate" /></label>
+          <label>结束日期<input v-model="draftEnd" type="date" :max="maxSelectableDate" /></label>
           <p v-if="customRangeError" class="date-error">{{ customRangeError }}</p>
           <div class="date-popover-actions"><button class="date-cancel" @click="showDatePicker = false">取消</button><button class="date-apply" @click="applyCustomRange">应用范围</button></div>
         </div>
@@ -247,10 +262,10 @@ onUnmounted(() => {
     </section>
 
     <section class="stat-grid">
-      <article class="stat-card stat-card-primary"><div class="card-icon icon-spark">✦</div><p>总按键数</p><strong>{{ formatNumber(totalKeyPresses) }}</strong><span class="trend up">↗ 12.8% <small>对比昨日</small></span></article>
-      <article class="stat-card"><div class="card-icon icon-mouse">●</div><p>鼠标操作</p><strong>{{ formatNumber(totalMouseActions) }}</strong><span class="trend up">↗ 8.4% <small>对比昨日</small></span></article>
-      <article class="stat-card"><div class="card-icon icon-time">◷</div><p>活跃时长</p><strong>5<span class="unit">h</span> 12<span class="unit">m</span></strong><span class="trend neutral">⌁ 分布在 9 个时段</span></article>
-      <article class="stat-card highlight-card"><div class="card-icon icon-top">♛</div><p>今日冠军</p><strong>{{ champion?.label ?? "暂无" }}</strong><span class="trend accent-text">{{ formatNumber(champion?.count ?? 0) }} 次按下</span></article>
+      <article class="stat-card stat-card-primary"><div class="card-icon icon-spark">✦</div><p>总按键数</p><strong>{{ formatNumber(totalKeyPresses) }}</strong><span class="trend" :class="demoMode ? 'up' : 'neutral'">{{ demoMode ? "↗ 12.8%" : "⌁ 已保存聚合" }} <small>{{ demoMode ? "对比昨日" : activeRangeLabel }}</small></span></article>
+      <article class="stat-card"><div class="card-icon icon-mouse">●</div><p>鼠标操作</p><strong>{{ formatNumber(totalMouseActions) }}</strong><span class="trend" :class="demoMode ? 'up' : 'neutral'">{{ demoMode ? "↗ 8.4%" : "⌁ 已保存聚合" }} <small>{{ demoMode ? "对比昨日" : activeRangeLabel }}</small></span></article>
+      <article class="stat-card"><div class="card-icon icon-time">◷</div><p>活跃时段</p><strong>{{ activeHours }}<span class="unit">h</span></strong><span class="trend neutral">⌁ 按小时聚合统计</span></article>
+      <article class="stat-card highlight-card"><div class="card-icon icon-top">♛</div><p>{{ activeRange === "今天" ? "今日冠军" : "范围冠军" }}</p><strong>{{ champion?.label ?? "暂无" }}</strong><span class="trend accent-text">{{ formatNumber(champion?.count ?? 0) }} 次按下</span></article>
     </section>
 
     <section class="content-grid">
