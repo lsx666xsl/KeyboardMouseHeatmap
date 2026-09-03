@@ -35,7 +35,7 @@ KeyPulse 是一个 Windows 优先、离线运行的键盘和鼠标使用统计�
   <tbody>
     <tr><td>项目规划</td><td>✅ 已完成</td><td>需求、架构、开发流程和交接规范已建立</td></tr>
     <tr><td>阶段备份</td><td>✅ 已完成</td><td>已生成规划阶段快照</td></tr>
-    <tr><td>Tauri 基础工程</td><td>🔄 进行中</td><td>前端、Rust 测试和 release exe 已通过，安装包收尾遇到环境错误</td></tr>
+    <tr><td>Tauri 基础工程</td><td>✅ 构建已验证</td><td>前端、Rust 测试、release exe、MSI 和 NSIS 均已通过</td></tr>
     <tr><td>输入监听</td><td>🔄 已实现待验收</td><td>Rust Windows Hook 已完成，默认过滤注入事件和自动重复</td></tr>
     <tr><td>热力图界面</td><td>🔄 已接入接口</td><td>演示页已连接 SQLite 查询和 stats-updated 实时事件，待人工验收</td></tr>
     <tr><td>日期筛选</td><td>🔄 已实现待验收</td><td>支持预设范围和自定义开始/结束日期</td></tr>

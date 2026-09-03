@@ -3,6 +3,7 @@ node_modules/
 dist/
 .vite/
 _tauri_scaffold/
+_nsis_temp/
 
 # Rust build output
 src-tauri/target/
