@@ -17,6 +17,26 @@ type DashboardData = {
 const ranges = ["今天", "本周", "本月"];
 const rangeKeys: Record<string, string> = { 今天: "today", 本周: "week", 本月: "month" };
 const activeRange = ref("今天");
+const showDatePicker = ref(false);
+const customRangeError = ref("");
+
+function formatDateInput(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function dateWithOffset(days: number) {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return formatDateInput(date);
+}
+
+const maxSelectableDate = formatDateInput(new Date());
+const customStart = ref(dateWithOffset(-6));
+const customEnd = ref(maxSelectableDate);
+const activeRangeLabel = computed(() => activeRange.value === "自定义" ? `${customStart.value} → ${customEnd.value}` : activeRange.value);
 const recording = ref(true);
 const liveDashboard = ref<DashboardData | null>(null);
 const demoMode = ref(true);
@@ -104,10 +124,17 @@ function heatLevel(count: number) {
   return ratio > 0.65 ? "hot" : ratio > 0.28 ? "warm" : "cool";
 }
 
+async function fetchActiveDashboard() {
+  if (activeRange.value === "自定义") {
+    return invoke<DashboardData>("get_dashboard_custom", { start: customStart.value, end: customEnd.value });
+  }
+  return invoke<DashboardData>("get_dashboard", { range: rangeKeys[activeRange.value] });
+}
+
 async function connectToRuntime() {
   try {
     const [snapshot, currentRecording] = await Promise.all([
-      invoke<DashboardData>("get_dashboard", { range: rangeKeys[activeRange.value] }),
+      fetchActiveDashboard(),
       invoke<boolean>("get_recording"),
     ]);
     liveDashboard.value = snapshot;
@@ -127,11 +154,36 @@ async function connectToRuntime() {
 
 async function changeRange(range: string) {
   activeRange.value = range;
+  customRangeError.value = "";
+  showDatePicker.value = false;
   if (!demoMode.value) {
     try {
-      liveDashboard.value = await invoke<DashboardData>("get_dashboard", { range: rangeKeys[range] });
+      liveDashboard.value = await fetchActiveDashboard();
     } catch (error) {
       console.info("Could not load dashboard range.", error);
+    }
+  }
+}
+
+async function applyCustomRange() {
+  customRangeError.value = "";
+  if (!customStart.value || !customEnd.value) {
+    customRangeError.value = "请选择开始日期和结束日期";
+    return;
+  }
+  if (customStart.value > customEnd.value) {
+    customRangeError.value = "开始日期不能晚于结束日期";
+    return;
+  }
+
+  activeRange.value = "自定义";
+  showDatePicker.value = false;
+  if (!demoMode.value) {
+    try {
+      liveDashboard.value = await fetchActiveDashboard();
+    } catch (error) {
+      customRangeError.value = "日期范围加载失败，请稍后重试";
+      console.info("Could not load custom dashboard range.", error);
     }
   }
 }
@@ -150,7 +202,7 @@ async function clearStats() {
   if (demoMode.value || !window.confirm("确定清空本地统计数据吗？此操作不可撤销。")) return;
   try {
     await invoke("clear_stats");
-    liveDashboard.value = await invoke<DashboardData>("get_dashboard", { range: rangeKeys[activeRange.value] });
+    liveDashboard.value = await fetchActiveDashboard();
   } catch (error) {
     console.info("Could not clear dashboard data.", error);
   }
@@ -180,8 +232,17 @@ onUnmounted(() => {
 
     <section class="hero-row">
       <div><p class="eyebrow accent">YOUR RHYTHM, VISUALIZED</p><h2>今天的输入节奏<br /><em>比昨天更有力。</em></h2><p class="hero-copy">看见每一次敲击、点击和滚动，找到属于你的数字节奏。</p></div>
-      <div class="range-switch" role="tablist" aria-label="时间范围">
-        <button v-for="range in ranges" :key="range" :class="{ active: activeRange === range }" @click="changeRange(range)">{{ range }}</button><button class="calendar-button" aria-label="选择日期">▣</button>
+      <div class="range-control">
+        <div class="range-switch" role="tablist" aria-label="时间范围">
+          <button v-for="range in ranges" :key="range" :class="{ active: activeRange === range }" @click="changeRange(range)">{{ range }}</button><button class="calendar-button" :class="{ active: activeRange === '自定义' }" aria-label="选择日期" :aria-expanded="showDatePicker" @click="showDatePicker = !showDatePicker">▣</button>
+        </div>
+        <div v-if="showDatePicker" class="date-popover">
+          <p class="date-popover-title">自定义时间范围</p>
+          <label>开始日期<input v-model="customStart" type="date" :max="maxSelectableDate" /></label>
+          <label>结束日期<input v-model="customEnd" type="date" :max="maxSelectableDate" /></label>
+          <p v-if="customRangeError" class="date-error">{{ customRangeError }}</p>
+          <div class="date-popover-actions"><button class="date-cancel" @click="showDatePicker = false">取消</button><button class="date-apply" @click="applyCustomRange">应用范围</button></div>
+        </div>
       </div>
     </section>
 
@@ -215,7 +276,7 @@ onUnmounted(() => {
       </div>
     </section>
 
-    <section class="panel timeline-panel"><div class="panel-heading compact"><div><p class="eyebrow">ACTIVITY PULSE · {{ activeRange }}</p><h3>一天中的活跃节奏</h3></div><span class="timeline-note">峰值时段 <b>{{ String(peakHour).padStart(2, "0") }}:00</b></span></div><div class="timeline-chart"><div class="chart-grid-lines"><i></i><i></i><i></i><i></i></div><div v-for="(value, hour) in hourlyActivity" :key="hour" class="chart-column"><div class="chart-bar" :style="{ height: `${value}%` }"><span>{{ value }}</span></div><small v-if="hour % 3 === 0">{{ String(hour).padStart(2, "0") }}:00</small></div></div></section>
+    <section class="panel timeline-panel"><div class="panel-heading compact"><div><p class="eyebrow">ACTIVITY PULSE · {{ activeRangeLabel }}</p><h3>一天中的活跃节奏</h3></div><span class="timeline-note">峰值时段 <b>{{ String(peakHour).padStart(2, "0") }}:00</b></span></div><div class="timeline-chart"><div class="chart-grid-lines"><i></i><i></i><i></i><i></i></div><div v-for="(value, hour) in hourlyActivity" :key="hour" class="chart-column"><div class="chart-bar" :style="{ height: `${value}%` }"><span>{{ value }}</span></div><small v-if="hour % 3 === 0">{{ String(hour).padStart(2, "0") }}:00</small></div></div></section>
     <footer class="footer-note"><span>KeyPulse · offline by design</span><span>隐私优先 · 只保存聚合统计，不保存输入文本</span><button class="clear-button" :disabled="demoMode" @click="clearStats">清空本地数据</button></footer>
   </main>
 </template>
@@ -231,7 +292,7 @@ onUnmounted(() => {
 .topbar, .hero-row, .stat-grid, .content-grid, .timeline-panel, .footer-note { position: relative; z-index: 1; max-width: 1480px; margin-inline: auto; }.topbar, .hero-row { display: flex; align-items: center; justify-content: space-between; gap: 24px; }.topbar { margin-bottom: 82px; }.brand-lockup, .topbar-actions, .range-switch, .legend, .keyboard-footer, .mouse-content, .timeline-note { display: flex; align-items: center; }.brand-lockup { gap: 13px; }.brand-mark { width: 34px; height: 34px; display: flex; align-items: end; justify-content: center; gap: 3px; padding: 6px; border-radius: 11px; transform: rotate(-8deg); background: linear-gradient(135deg, #ff5c7a, #a78bfa); box-shadow: 0 8px 24px rgba(255,92,122,.23); }.brand-mark span { display: block; width: 5px; border-radius: 5px; background: #fff; }.brand-mark span:nth-child(1) { height: 11px; opacity: .75; }.brand-mark span:nth-child(2) { height: 18px; }.brand-mark span:nth-child(3) { height: 14px; opacity: .85; }
 .eyebrow { margin: 0; color: #7e8eae; font-size: 10px; font-weight: 800; letter-spacing: .18em; line-height: 1.3; }.eyebrow.accent { color: #ff8098; } h1, h2, h3, p { margin-top: 0; } h1 { margin-bottom: 0; font-size: 19px; line-height: 1; letter-spacing: -.04em; } h1 span { color: #ff718b; }.topbar-actions { gap: 12px; }
 .demo-chip, .record-button, .avatar-button, .range-switch, .panel-kicker { border: 1px solid rgba(148,163,184,.15); background: rgba(23,37,84,.55); }.demo-chip { display: flex; align-items: center; gap: 8px; padding: 9px 13px; border-radius: 999px; color: #a9b6cc; font-size: 11px; }.demo-chip i, .live-indicator { width: 7px; height: 7px; border-radius: 50%; background: #2de2a6; box-shadow: 0 0 0 4px rgba(45,226,166,.11), 0 0 14px #2de2a6; }.record-button { display: flex; align-items: center; gap: 8px; padding: 9px 13px; border-radius: 999px; color: #e2e8f0; cursor: pointer; font-size: 11px; transition: .2s ease; }.record-button:hover { border-color: rgba(52,217,255,.7); transform: translateY(-1px); }.record-button.paused { color: #a9b6cc; }.record-dot { width: 7px; height: 7px; border-radius: 50%; background: #ff5c7a; box-shadow: 0 0 12px #ff5c7a; }.paused .record-dot { background: #64748b; box-shadow: none; }.avatar-button { width: 34px; height: 34px; border-radius: 50%; color: #fff; font-size: 10px; font-weight: 800; cursor: pointer; background: linear-gradient(135deg, #34d9ff, #a78bfa); }
-.hero-row { align-items: end; margin-bottom: 35px; } h2 { margin-bottom: 13px; font-size: clamp(34px,4vw,58px); line-height: 1.05; letter-spacing: -.065em; } h2 em { color: #ff718b; font-style: normal; }.hero-copy { margin-bottom: 0; color: #8292ae; font-size: 14px; }.range-switch { gap: 3px; padding: 4px; border-radius: 13px; }.range-switch button { border: 0; padding: 9px 15px; border-radius: 9px; color: #7e8eae; background: transparent; cursor: pointer; font-size: 12px; }.range-switch button:hover { color: #f8fafc; }.range-switch button.active { color: #fff; background: #2f3c65; box-shadow: 0 5px 13px rgba(0,0,0,.15); }.range-switch .calendar-button { padding-inline: 12px; color: #34d9ff; }
+.hero-row { align-items: end; margin-bottom: 35px; } h2 { margin-bottom: 13px; font-size: clamp(34px,4vw,58px); line-height: 1.05; letter-spacing: -.065em; } h2 em { color: #ff718b; font-style: normal; }.hero-copy { margin-bottom: 0; color: #8292ae; font-size: 14px; }.range-control { position: relative; }.range-switch { gap: 3px; padding: 4px; border-radius: 13px; }.range-switch button { border: 0; padding: 9px 15px; border-radius: 9px; color: #7e8eae; background: transparent; cursor: pointer; font-size: 12px; }.range-switch button:hover { color: #f8fafc; }.range-switch button.active { color: #fff; background: #2f3c65; box-shadow: 0 5px 13px rgba(0,0,0,.15); }.range-switch .calendar-button { padding-inline: 12px; color: #34d9ff; }.date-popover { position: absolute; z-index: 5; top: calc(100% + 10px); right: 0; width: 252px; padding: 16px; border: 1px solid rgba(52,217,255,.22); border-radius: 15px; background: rgba(19,31,70,.98); box-shadow: 0 18px 42px rgba(0,0,0,.35); }.date-popover-title { margin: 0 0 13px; color: #f8fafc; font-size: 12px; font-weight: 800; }.date-popover label { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; color: #8d9ab3; font-size: 10px; }.date-popover input { width: 100%; border: 1px solid rgba(148,163,184,.2); border-radius: 8px; padding: 8px 9px; color: #f8fafc; background: rgba(8,16,35,.72); color-scheme: dark; font-size: 11px; }.date-popover input:focus { outline: 2px solid rgba(52,217,255,.45); outline-offset: 1px; }.date-error { margin: 10px 0 0; color: #ff8098; font-size: 10px; }.date-popover-actions { display: flex; justify-content: end; gap: 8px; margin-top: 15px; }.date-popover-actions button { border: 0; border-radius: 8px; padding: 8px 10px; cursor: pointer; font-size: 10px; }.date-cancel { color: #a9b6cc; background: rgba(148,163,184,.12); }.date-apply { color: #091329; background: #34d9ff; font-weight: 800; }.date-apply:hover { background: #72e5ff; }
 .stat-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 14px; margin-bottom: 15px; }.stat-card, .panel { border: 1px solid rgba(148,163,184,.13); background: linear-gradient(145deg,rgba(23,37,84,.86),rgba(15,23,42,.9)); box-shadow: 0 20px 50px rgba(0,0,0,.13); }.stat-card { position: relative; min-height: 168px; padding: 22px 23px; overflow: hidden; border-radius: 18px; }.stat-card::after { position: absolute; content: ""; right: -37px; bottom: -45px; width: 135px; height: 135px; border: 1px solid rgba(52,217,255,.1); border-radius: 50%; }.stat-card-primary { background: linear-gradient(140deg,rgba(49,56,112,.97),rgba(23,37,84,.8)); }.highlight-card { background: linear-gradient(140deg,rgba(117,54,111,.55),rgba(23,37,84,.86)); }.card-icon { display: grid; place-items: center; width: 30px; height: 30px; margin-bottom: 19px; border-radius: 9px; font-size: 14px; }.icon-spark { color: #ffd166; background: rgba(255,209,102,.14); }.icon-mouse { color: #34d9ff; background: rgba(52,217,255,.13); }.icon-time { color: #a78bfa; background: rgba(167,139,250,.14); }.icon-top { color: #ff8098; background: rgba(255,92,122,.14); }.stat-card p { margin-bottom: 5px; color: #8d9ab3; font-size: 11px; }.stat-card strong { display: block; margin-bottom: 11px; font-size: 28px; letter-spacing: -.05em; }.unit { margin-left: 2px; color: #8d9ab3; font-size: 14px; font-weight: 500; letter-spacing: 0; }.trend { font-size: 11px; }.trend small { margin-left: 5px; color: #8190a9; }.trend.up { color: #2de2a6; }.trend.neutral { color: #8d9ab3; }.accent-text { color: #ff8098; }
 .content-grid { display: grid; grid-template-columns: minmax(0,1.8fr) minmax(300px,.85fr); gap: 15px; margin-bottom: 15px; }.panel { border-radius: 18px; }.keyboard-panel { padding: 27px 28px 20px; }.panel-heading { display: flex; align-items: start; justify-content: space-between; gap: 18px; margin-bottom: 28px; }.panel-heading.compact { align-items: center; margin-bottom: 22px; }.panel h3 { margin: 5px 0 0; font-size: 19px; letter-spacing: -.04em; }.legend { gap: 9px; color: #71819d; font-size: 10px; }.legend-gradient { display: block; width: 75px; height: 6px; border-radius: 99px; background: linear-gradient(90deg,#276eaa,#34d9ff,#2de2a6,#ffd166,#ff5c7a); }
 .keyboard-wrap { display: flex; flex-direction: column; gap: 8px; padding: 20px 16px; border-radius: 15px; background: rgba(8,16,35,.42); }.keyboard-row { display: flex; gap: 7px; min-height: 45px; }.keycap { display: flex; min-width: 0; flex-direction: column; justify-content: space-between; padding: 8px 8px 6px; border: 1px solid color-mix(in srgb,var(--key-color),white 18%); border-radius: 7px; color: #fff; background: linear-gradient(145deg,color-mix(in srgb,var(--key-color),white 9%),var(--key-color)); box-shadow: inset 0 1px rgba(255,255,255,.15),0 5px 10px rgba(0,0,0,.17); transition: transform .18s ease,filter .18s ease; }.keycap:hover { z-index: 2; filter: brightness(1.16); transform: translateY(-4px) scale(1.04); }.keycap span { overflow: hidden; color: rgba(255,255,255,.78); font-size: 9px; font-weight: 700; text-overflow: ellipsis; }.keycap b { overflow: hidden; font-size: 9px; font-weight: 700; text-overflow: ellipsis; }.keycap.muted { opacity: .7; }.keycap.warm { box-shadow: inset 0 1px rgba(255,255,255,.17),0 5px 14px color-mix(in srgb,var(--key-color),transparent 65%); }.keycap.hot { box-shadow: inset 0 1px rgba(255,255,255,.2),0 6px 18px color-mix(in srgb,var(--key-color),transparent 53%); }.keyboard-footer { justify-content: space-between; margin-top: 18px; color: #71819d; font-size: 10px; }.keyboard-footer span { display: flex; align-items: center; gap: 8px; }.live-indicator { width: 5px; height: 5px; }

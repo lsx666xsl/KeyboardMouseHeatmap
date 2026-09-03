@@ -149,9 +149,27 @@ impl StatsStore {
 
     pub fn dashboard_range(&self, range: &str) -> Result<DashboardData, String> {
         let (start, end) = range_bounds(range)?;
-        let start = start.format("%Y-%m-%d").to_string();
-        let end = end.format("%Y-%m-%d").to_string();
-        self.dashboard_between(&start, &end)
+        self.dashboard_custom(
+            &start.format("%Y-%m-%d").to_string(),
+            &end.format("%Y-%m-%d").to_string(),
+        )
+    }
+
+    pub fn dashboard_custom(
+        &self,
+        start_date: &str,
+        end_date: &str,
+    ) -> Result<DashboardData, String> {
+        let start = parse_date(start_date)?;
+        let end = parse_date(end_date)?;
+        if start > end {
+            return Err("custom dashboard range start date must not be after end date".to_string());
+        }
+
+        self.dashboard_between(
+            &start.format("%Y-%m-%d").to_string(),
+            &end.format("%Y-%m-%d").to_string(),
+        )
     }
 
     fn dashboard_between(&self, start_date: &str, end_date: &str) -> Result<DashboardData, String> {
@@ -274,6 +292,11 @@ fn range_bounds(range: &str) -> Result<(NaiveDate, NaiveDate), String> {
     Ok((start, today))
 }
 
+fn parse_date(value: &str) -> Result<NaiveDate, String> {
+    NaiveDate::parse_from_str(value, "%Y-%m-%d")
+        .map_err(|_| format!("invalid dashboard date: {value}; expected YYYY-MM-DD"))
+}
+
 fn scalar_count(
     connection: &Connection,
     query: &str,
@@ -340,5 +363,19 @@ mod tests {
         assert_eq!(dashboard.total_key_presses, 2);
         assert_eq!(dashboard.activity[8].count, 1);
         assert_eq!(dashboard.activity[9].count, 1);
+    }
+
+    #[test]
+    fn custom_range_validates_dates_and_includes_boundaries() {
+        let store = StatsStore::open_in_memory().expect("database should initialize");
+        store.record_key_at("2026-09-01", 8, "a", "A").unwrap();
+        store.record_key_at("2026-09-02", 9, "b", "B").unwrap();
+        store.record_key_at("2026-09-04", 10, "c", "C").unwrap();
+
+        let dashboard = store.dashboard_custom("2026-09-01", "2026-09-02").unwrap();
+        assert_eq!(dashboard.total_key_presses, 2);
+        assert_eq!(dashboard.date, "2026-09-02");
+        assert!(store.dashboard_custom("2026-09-03", "2026-09-02").is_err());
+        assert!(store.dashboard_custom("2026-09-99", "2026-09-30").is_err());
     }
 }

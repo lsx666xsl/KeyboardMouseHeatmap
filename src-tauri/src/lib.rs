@@ -17,6 +17,15 @@ fn get_dashboard(
 }
 
 #[tauri::command]
+fn get_dashboard_custom(
+    start: String,
+    end: String,
+    store: State<'_, Arc<StatsStore>>,
+) -> Result<DashboardData, String> {
+    store.dashboard_custom(&start, &end)
+}
+
+#[tauri::command]
 fn set_recording(enabled: bool, recording: State<'_, RecordingState>) -> Result<(), String> {
     recording
         .enabled
@@ -66,6 +75,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             get_dashboard,
+            get_dashboard_custom,
             set_recording,
             get_recording,
             clear_stats
