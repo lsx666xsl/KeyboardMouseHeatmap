@@ -1,0 +1,25 @@
+# Frontend dependencies and build output
+node_modules/
+dist/
+.vite/
+
+# Rust build output
+src-tauri/target/
+
+# Local runtime data
+*.sqlite
+*.sqlite3
+*.db
+data/
+runtime/
+
+# IDE and OS files
+.idea/
+.vscode/
+*.user
+*.suo
+Thumbs.db
+Desktop.ini
+
+# Local logs
+*.log
