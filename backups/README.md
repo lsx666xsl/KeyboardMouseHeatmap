@@ -26,6 +26,7 @@
 - [x] 自定义日期范围阶段快照：`backups/2026-09-04-custom-date.zip`
 - [x] Windows 安装包阶段快照：`backups/2026-09-04-windows-packaging.zip`
 - [x] 托盘生命周期阶段快照：`backups/2026-09-04-tray-lifecycle.zip`（仅归档源码、配置和文档，排除历史 `backups/`）
+- [x] 真实数据卡片阶段快照：`backups/2026-09-04-live-copy.zip`（仅归档源码、配置和文档，排除历史 `backups/`）
 - [ ] MVP 完成快照
 
 每次创建快照后，在 `notes/开发日志.md` 和 `notes/交接说明.md` 中记录文件名及对应 Git commit。
