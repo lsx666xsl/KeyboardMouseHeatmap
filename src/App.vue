@@ -21,6 +21,7 @@ const recording = ref(true);
 const liveDashboard = ref<DashboardData | null>(null);
 const demoMode = ref(true);
 let stopStatsListener: UnlistenFn | undefined;
+let stopRecordingListener: UnlistenFn | undefined;
 
 const keyboardRows: KeyItem[][] = [
   ["Esc", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"].map((label, index) => ({ id: label, label, count: [122, 84, 96, 44, 58, 278, 65, 72, 51, 40, 32, 29, 20][index], muted: true })),
@@ -115,6 +116,9 @@ async function connectToRuntime() {
     stopStatsListener = await listen<DashboardData>("stats-updated", (event) => {
       if (activeRange.value === "今天") liveDashboard.value = event.payload;
     });
+    stopRecordingListener = await listen<boolean>("recording-changed", (event) => {
+      recording.value = event.payload;
+    });
   } catch (error) {
     // `npm run dev` runs outside Tauri, so keeping the preview data is intentional.
     console.info("KeyPulse runtime is not connected; showing preview data.", error);
@@ -153,7 +157,10 @@ async function clearStats() {
 }
 
 onMounted(connectToRuntime);
-onUnmounted(() => stopStatsListener?.());
+onUnmounted(() => {
+  stopStatsListener?.();
+  stopRecordingListener?.();
+});
 </script>
 
 <template>

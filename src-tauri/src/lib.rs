@@ -4,7 +4,9 @@ mod storage;
 use input::{InputListener, RecordingState};
 use std::sync::Arc;
 use storage::{DashboardData, StatsStore};
-use tauri::{Manager, State};
+use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem};
+use tauri::tray::TrayIconBuilder;
+use tauri::{Emitter, Manager, State};
 
 #[tauri::command]
 fn get_dashboard(
@@ -57,6 +59,8 @@ pub fn run() {
                     eprintln!("KeyPulse input listener unavailable: {error}");
                 }
             }
+
+            setup_tray(app)?;
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
@@ -68,4 +72,52 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+fn setup_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    let show = MenuItemBuilder::with_id("show", "打开 KeyPulse").build(app)?;
+    let toggle = MenuItemBuilder::with_id("toggle-recording", "暂停/继续记录").build(app)?;
+    let clear = MenuItemBuilder::with_id("clear-stats", "清空本地统计").build(app)?;
+    let separator = PredefinedMenuItem::separator(app)?;
+    let quit = PredefinedMenuItem::quit(app, Some("退出 KeyPulse"))?;
+    let menu = MenuBuilder::new(app)
+        .items(&[&show, &toggle, &clear, &separator, &quit])
+        .build()?;
+
+    let mut tray = TrayIconBuilder::with_id("keypulse-tray")
+        .menu(&menu)
+        .tooltip("KeyPulse 键鼠热力图")
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "show" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+            "toggle-recording" => {
+                if let Some(recording) = app.try_state::<RecordingState>() {
+                    let enabled = !recording.enabled.load(std::sync::atomic::Ordering::Relaxed);
+                    recording
+                        .enabled
+                        .store(enabled, std::sync::atomic::Ordering::Relaxed);
+                    let _ = app.emit("recording-changed", enabled);
+                }
+            }
+            "clear-stats" => {
+                if let Some(store) = app.try_state::<Arc<StatsStore>>() {
+                    if store.clear().is_ok() {
+                        if let Ok(snapshot) = store.dashboard_today() {
+                            let _ = app.emit("stats-updated", snapshot);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        });
+
+    if let Some(icon) = app.default_window_icon().cloned() {
+        tray = tray.icon(icon);
+    }
+    app.manage(tray.build(app)?);
+    Ok(())
 }
