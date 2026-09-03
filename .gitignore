@@ -2,6 +2,7 @@
 node_modules/
 dist/
 .vite/
+_tauri_scaffold/
 
 # Rust build output
 src-tauri/target/
