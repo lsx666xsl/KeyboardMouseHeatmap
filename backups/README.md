@@ -23,6 +23,7 @@
 - [x] 输入监听 + SQLite 阶段快照：`backups/2026-09-04-input-storage.zip`
 - [x] 日期范围与清空控制快照：`backups/2026-09-04-dashboard-range.zip`
 - [x] 系统托盘阶段快照：`backups/2026-09-04-tray.zip`
+- [x] 自定义日期范围阶段快照：`backups/2026-09-04-custom-date.zip`
 - [ ] MVP 完成快照
 
 每次创建快照后，在 `notes/开发日志.md` 和 `notes/交接说明.md` 中记录文件名及对应 Git commit。
