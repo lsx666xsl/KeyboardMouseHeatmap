@@ -1,7 +1,7 @@
 mod input;
 mod storage;
 
-use input::{InputListener, RecordingState};
+use input::{InputListener, InputStatus, RecordingState};
 use std::sync::Arc;
 use storage::{DashboardData, StatsStore};
 use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem};
@@ -39,6 +39,11 @@ fn get_recording(recording: State<'_, RecordingState>) -> bool {
 }
 
 #[tauri::command]
+fn get_input_status(status: State<'_, InputStatus>) -> bool {
+    status.available.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+#[tauri::command]
 fn clear_stats(store: State<'_, Arc<StatsStore>>) -> Result<(), String> {
     store.clear()
 }
@@ -56,12 +61,18 @@ pub fn run() {
             let store = StatsStore::open(&data_dir.join("keypulse.sqlite"))
                 .map_err(std::io::Error::other)?;
             let recording = RecordingState::default();
+            let input_status = InputStatus::default();
             let listener_store = Arc::clone(&store);
             let listener_recording = recording.clone();
+            let listener_status = input_status.clone();
             app.manage(store);
             app.manage(recording);
+            app.manage(input_status);
             match InputListener::start(app.handle().clone(), listener_store, listener_recording) {
                 Ok(listener) => {
+                    listener_status
+                        .available
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
                     app.manage(listener);
                 }
                 Err(error) => {
@@ -78,6 +89,7 @@ pub fn run() {
             get_dashboard_custom,
             set_recording,
             get_recording,
+            get_input_status,
             clear_stats
         ])
         .on_window_event(|window, event| {

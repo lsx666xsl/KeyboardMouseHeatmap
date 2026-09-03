@@ -15,6 +15,19 @@ impl Default for RecordingState {
     }
 }
 
+#[derive(Clone)]
+pub struct InputStatus {
+    pub available: Arc<AtomicBool>,
+}
+
+impl Default for InputStatus {
+    fn default() -> Self {
+        Self {
+            available: Arc::new(AtomicBool::new(false)),
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct KeyPressFilter {
     pressed: HashSet<u32>,
@@ -446,7 +459,8 @@ impl InputListener {
 
 #[cfg(test)]
 mod tests {
-    use super::KeyPressFilter;
+    use super::{InputStatus, KeyPressFilter};
+    use std::sync::atomic::Ordering;
 
     #[test]
     fn filters_auto_repeat_until_key_up() {
@@ -465,5 +479,13 @@ mod tests {
         assert!(!filter.accept_down(30));
         filter.accept_up(30);
         assert!(filter.accept_down(30));
+    }
+
+    #[test]
+    fn input_status_starts_unavailable_until_hook_is_ready() {
+        let status = InputStatus::default();
+        assert!(!status.available.load(Ordering::Relaxed));
+        status.available.store(true, Ordering::Relaxed);
+        assert!(status.available.load(Ordering::Relaxed));
     }
 }
