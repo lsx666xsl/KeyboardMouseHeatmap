@@ -7,8 +7,11 @@ use storage::{DashboardData, StatsStore};
 use tauri::{Manager, State};
 
 #[tauri::command]
-fn get_dashboard(store: State<'_, Arc<StatsStore>>) -> Result<DashboardData, String> {
-    store.dashboard_today()
+fn get_dashboard(
+    range: Option<String>,
+    store: State<'_, Arc<StatsStore>>,
+) -> Result<DashboardData, String> {
+    store.dashboard_range(range.as_deref().unwrap_or("today"))
 }
 
 #[tauri::command]

@@ -15,6 +15,7 @@ type DashboardData = {
 };
 
 const ranges = ["今天", "本周", "本月"];
+const rangeKeys: Record<string, string> = { 今天: "today", 本周: "week", 本月: "month" };
 const activeRange = ref("今天");
 const recording = ref(true);
 const liveDashboard = ref<DashboardData | null>(null);
@@ -105,18 +106,29 @@ function heatLevel(count: number) {
 async function connectToRuntime() {
   try {
     const [snapshot, currentRecording] = await Promise.all([
-      invoke<DashboardData>("get_dashboard"),
+      invoke<DashboardData>("get_dashboard", { range: rangeKeys[activeRange.value] }),
       invoke<boolean>("get_recording"),
     ]);
     liveDashboard.value = snapshot;
     demoMode.value = false;
     recording.value = currentRecording;
     stopStatsListener = await listen<DashboardData>("stats-updated", (event) => {
-      liveDashboard.value = event.payload;
+      if (activeRange.value === "今天") liveDashboard.value = event.payload;
     });
   } catch (error) {
     // `npm run dev` runs outside Tauri, so keeping the preview data is intentional.
     console.info("KeyPulse runtime is not connected; showing preview data.", error);
+  }
+}
+
+async function changeRange(range: string) {
+  activeRange.value = range;
+  if (!demoMode.value) {
+    try {
+      liveDashboard.value = await invoke<DashboardData>("get_dashboard", { range: rangeKeys[range] });
+    } catch (error) {
+      console.info("Could not load dashboard range.", error);
+    }
   }
 }
 
@@ -128,6 +140,16 @@ async function toggleRecording() {
     // The browser-only preview still lets the control be explored.
   }
   recording.value = nextValue;
+}
+
+async function clearStats() {
+  if (demoMode.value || !window.confirm("确定清空本地统计数据吗？此操作不可撤销。")) return;
+  try {
+    await invoke("clear_stats");
+    liveDashboard.value = await invoke<DashboardData>("get_dashboard", { range: rangeKeys[activeRange.value] });
+  } catch (error) {
+    console.info("Could not clear dashboard data.", error);
+  }
 }
 
 onMounted(connectToRuntime);
@@ -152,7 +174,7 @@ onUnmounted(() => stopStatsListener?.());
     <section class="hero-row">
       <div><p class="eyebrow accent">YOUR RHYTHM, VISUALIZED</p><h2>今天的输入节奏<br /><em>比昨天更有力。</em></h2><p class="hero-copy">看见每一次敲击、点击和滚动，找到属于你的数字节奏。</p></div>
       <div class="range-switch" role="tablist" aria-label="时间范围">
-        <button v-for="range in ranges" :key="range" :class="{ active: activeRange === range }" @click="activeRange = range">{{ range }}</button><button class="calendar-button" aria-label="选择日期">▣</button>
+        <button v-for="range in ranges" :key="range" :class="{ active: activeRange === range }" @click="changeRange(range)">{{ range }}</button><button class="calendar-button" aria-label="选择日期">▣</button>
       </div>
     </section>
 
@@ -187,7 +209,7 @@ onUnmounted(() => stopStatsListener?.());
     </section>
 
     <section class="panel timeline-panel"><div class="panel-heading compact"><div><p class="eyebrow">ACTIVITY PULSE · {{ activeRange }}</p><h3>一天中的活跃节奏</h3></div><span class="timeline-note">峰值时段 <b>{{ String(peakHour).padStart(2, "0") }}:00</b></span></div><div class="timeline-chart"><div class="chart-grid-lines"><i></i><i></i><i></i><i></i></div><div v-for="(value, hour) in hourlyActivity" :key="hour" class="chart-column"><div class="chart-bar" :style="{ height: `${value}%` }"><span>{{ value }}</span></div><small v-if="hour % 3 === 0">{{ String(hour).padStart(2, "0") }}:00</small></div></div></section>
-    <footer class="footer-note"><span>KeyPulse · offline by design</span><span>隐私优先 · 只保存聚合统计，不保存输入文本</span></footer>
+    <footer class="footer-note"><span>KeyPulse · offline by design</span><span>隐私优先 · 只保存聚合统计，不保存输入文本</span><button class="clear-button" :disabled="demoMode" @click="clearStats">清空本地数据</button></footer>
   </main>
 </template>
 
@@ -207,7 +229,7 @@ onUnmounted(() => stopStatsListener?.());
 .content-grid { display: grid; grid-template-columns: minmax(0,1.8fr) minmax(300px,.85fr); gap: 15px; margin-bottom: 15px; }.panel { border-radius: 18px; }.keyboard-panel { padding: 27px 28px 20px; }.panel-heading { display: flex; align-items: start; justify-content: space-between; gap: 18px; margin-bottom: 28px; }.panel-heading.compact { align-items: center; margin-bottom: 22px; }.panel h3 { margin: 5px 0 0; font-size: 19px; letter-spacing: -.04em; }.legend { gap: 9px; color: #71819d; font-size: 10px; }.legend-gradient { display: block; width: 75px; height: 6px; border-radius: 99px; background: linear-gradient(90deg,#276eaa,#34d9ff,#2de2a6,#ffd166,#ff5c7a); }
 .keyboard-wrap { display: flex; flex-direction: column; gap: 8px; padding: 20px 16px; border-radius: 15px; background: rgba(8,16,35,.42); }.keyboard-row { display: flex; gap: 7px; min-height: 45px; }.keycap { display: flex; min-width: 0; flex-direction: column; justify-content: space-between; padding: 8px 8px 6px; border: 1px solid color-mix(in srgb,var(--key-color),white 18%); border-radius: 7px; color: #fff; background: linear-gradient(145deg,color-mix(in srgb,var(--key-color),white 9%),var(--key-color)); box-shadow: inset 0 1px rgba(255,255,255,.15),0 5px 10px rgba(0,0,0,.17); transition: transform .18s ease,filter .18s ease; }.keycap:hover { z-index: 2; filter: brightness(1.16); transform: translateY(-4px) scale(1.04); }.keycap span { overflow: hidden; color: rgba(255,255,255,.78); font-size: 9px; font-weight: 700; text-overflow: ellipsis; }.keycap b { overflow: hidden; font-size: 9px; font-weight: 700; text-overflow: ellipsis; }.keycap.muted { opacity: .7; }.keycap.warm { box-shadow: inset 0 1px rgba(255,255,255,.17),0 5px 14px color-mix(in srgb,var(--key-color),transparent 65%); }.keycap.hot { box-shadow: inset 0 1px rgba(255,255,255,.2),0 6px 18px color-mix(in srgb,var(--key-color),transparent 53%); }.keyboard-footer { justify-content: space-between; margin-top: 18px; color: #71819d; font-size: 10px; }.keyboard-footer span { display: flex; align-items: center; gap: 8px; }.live-indicator { width: 5px; height: 5px; }
 .side-column { display: flex; flex-direction: column; gap: 15px; }.mouse-panel, .top-keys-panel { padding: 24px 25px; }.panel-kicker { padding: 5px 8px; border-radius: 6px; color: #7e8eae; font-size: 9px; }.mouse-content { gap: 20px; align-items: center; }.mouse-shape { position: relative; flex: 0 0 105px; height: 148px; border: 2px solid rgba(167,139,250,.58); border-radius: 52px 52px 43px 43px; background: linear-gradient(160deg,rgba(52,217,255,.2),rgba(167,139,250,.14)); transform: rotate(-3deg); }.mouse-top { position: relative; display: flex; height: 85px; overflow: hidden; border-bottom: 1px solid rgba(167,139,250,.25); border-radius: 50px 50px 0 0; }.mouse-button { position: relative; flex: 1; padding-top: 25px; color: #fff; text-align: center; font-size: 9px; }.mouse-left { border-right: 1px solid rgba(167,139,250,.25); background: linear-gradient(135deg,rgba(255,92,122,.82),rgba(255,92,122,.12)); }.mouse-right { background: linear-gradient(45deg,rgba(167,139,250,.1),rgba(167,139,250,.7)); }.mouse-wheel { position: absolute; top: 15px; left: 50%; width: 13px; height: 25px; border: 1px solid rgba(255,255,255,.55); border-radius: 8px; transform: translateX(-50%); }.mouse-wheel i { display: block; width: 3px; height: 8px; margin: 4px auto; border-radius: 3px; background: #34d9ff; }.mouse-side-buttons { position: absolute; top: 65px; right: -8px; display: flex; flex-direction: column; gap: 5px; }.mouse-side-buttons i { width: 9px; height: 20px; border: 1px solid rgba(45,226,166,.65); border-radius: 4px; background: rgba(45,226,166,.35); }.mouse-stats { flex: 1; display: flex; flex-direction: column; gap: 12px; }.mouse-stat { display: grid; grid-template-columns: 7px 1fr auto; align-items: center; gap: 8px; color: #8d9ab3; font-size: 10px; }.mouse-stat i { width: 6px; height: 6px; border-radius: 50%; }.mouse-stat b { color: #e2e8f0; font-size: 11px; }.sparkline { color: #ff718b; font-size: 18px; letter-spacing: -5px; }.top-key-list { display: flex; flex-direction: column; gap: 13px; }.top-key-row { display: grid; grid-template-columns: 23px 48px 1fr 44px; align-items: center; gap: 9px; }.rank { color: #546582; font-size: 9px; }.top-key-label { color: #e2e8f0; font-size: 11px; font-weight: 700; }.mini-bar { height: 5px; overflow: hidden; border-radius: 99px; background: #263452; }.mini-bar i { display: block; height: 100%; border-radius: inherit; }.top-key-row b { color: #a9b6cc; text-align: right; font-size: 10px; }
-.timeline-panel { padding: 24px 28px 20px; }.timeline-note { gap: 5px; color: #8190a9; font-size: 10px; }.timeline-note b { color: #ff8098; }.timeline-chart { position: relative; display: flex; align-items: end; gap: 7px; height: 120px; padding: 0 6px; }.chart-grid-lines { position: absolute; inset: 0 6px 20px; display: flex; flex-direction: column; justify-content: space-between; }.chart-grid-lines i { display: block; border-top: 1px dashed rgba(148,163,184,.1); }.chart-column { position: relative; z-index: 1; display: flex; flex: 1; height: 100%; flex-direction: column; align-items: center; justify-content: end; gap: 8px; }.chart-bar { position: relative; width: min(100%,30px); min-height: 5px; border-radius: 6px 6px 2px 2px; background: linear-gradient(180deg,#ff718b,#a78bfa 75%,#455184); opacity: .85; transition: height .25s ease,opacity .2s ease; }.chart-bar:hover { opacity: 1; }.chart-bar span { position: absolute; top: -17px; left: 50%; display: none; color: #f8fafc; font-size: 8px; transform: translateX(-50%); }.chart-bar:hover span { display: block; }.chart-column small { height: 12px; color: #62728f; font-size: 8px; }.footer-note { display: flex; justify-content: space-between; margin-top: 15px; color: #53627c; font-size: 10px; }
+.timeline-panel { padding: 24px 28px 20px; }.timeline-note { gap: 5px; color: #8190a9; font-size: 10px; }.timeline-note b { color: #ff8098; }.timeline-chart { position: relative; display: flex; align-items: end; gap: 7px; height: 120px; padding: 0 6px; }.chart-grid-lines { position: absolute; inset: 0 6px 20px; display: flex; flex-direction: column; justify-content: space-between; }.chart-grid-lines i { display: block; border-top: 1px dashed rgba(148,163,184,.1); }.chart-column { position: relative; z-index: 1; display: flex; flex: 1; height: 100%; flex-direction: column; align-items: center; justify-content: end; gap: 8px; }.chart-bar { position: relative; width: min(100%,30px); min-height: 5px; border-radius: 6px 6px 2px 2px; background: linear-gradient(180deg,#ff718b,#a78bfa 75%,#455184); opacity: .85; transition: height .25s ease,opacity .2s ease; }.chart-bar:hover { opacity: 1; }.chart-bar span { position: absolute; top: -17px; left: 50%; display: none; color: #f8fafc; font-size: 8px; transform: translateX(-50%); }.chart-bar:hover span { display: block; }.chart-column small { height: 12px; color: #62728f; font-size: 8px; }.footer-note { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 15px; color: #53627c; font-size: 10px; }.clear-button { border: 0; padding: 0; color: #63728d; background: transparent; cursor: pointer; font-size: 10px; }.clear-button:hover:not(:disabled) { color: #ff8098; }.clear-button:disabled { cursor: not-allowed; opacity: .35; }
 @media (max-width: 1050px) { .content-grid { grid-template-columns: 1fr; }.side-column { display: grid; grid-template-columns: 1fr 1fr; }.keyboard-panel { overflow-x: auto; }.keyboard-wrap { min-width: 770px; } }
 @media (max-width: 720px) { .app-shell { padding: 22px 15px; }.topbar { align-items: flex-start; margin-bottom: 58px; }.topbar-actions { gap: 7px; }.demo-chip { display: none; }.hero-row { align-items: flex-start; flex-direction: column; }.range-switch { align-self: stretch; justify-content: space-between; }.range-switch button { flex: 1; }.stat-grid { grid-template-columns: 1fr 1fr; }.stat-card { min-height: 145px; padding: 16px; }.stat-card strong { font-size: 22px; }.side-column { display: flex; }.mouse-content { justify-content: center; }.timeline-panel, .keyboard-panel, .mouse-panel, .top-keys-panel { padding-inline: 17px; }.footer-note { flex-direction: column; gap: 7px; } }
 </style>

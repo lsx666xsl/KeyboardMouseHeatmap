@@ -1,4 +1,4 @@
-use chrono::{Local, Timelike};
+use chrono::{Datelike, Duration, Local, NaiveDate, Timelike};
 use rusqlite::{params, Connection};
 use serde::Serialize;
 use std::path::Path;
@@ -144,34 +144,42 @@ impl StatsStore {
     }
 
     pub fn dashboard_today(&self) -> Result<DashboardData, String> {
-        let date = Local::now().format("%Y-%m-%d").to_string();
-        self.dashboard_for(&date)
+        self.dashboard_range("today")
     }
 
-    fn dashboard_for(&self, date: &str) -> Result<DashboardData, String> {
+    pub fn dashboard_range(&self, range: &str) -> Result<DashboardData, String> {
+        let (start, end) = range_bounds(range)?;
+        let start = start.format("%Y-%m-%d").to_string();
+        let end = end.format("%Y-%m-%d").to_string();
+        self.dashboard_between(&start, &end)
+    }
+
+    fn dashboard_between(&self, start_date: &str, end_date: &str) -> Result<DashboardData, String> {
         let connection = self.connection.lock().map_err(|error| error.to_string())?;
         let total_key_presses = scalar_count(
             &connection,
-            "SELECT COALESCE(SUM(press_count), 0) FROM key_stats WHERE stat_date = ?1",
-            date,
+            "SELECT COALESCE(SUM(press_count), 0) FROM key_stats WHERE stat_date BETWEEN ?1 AND ?2",
+            start_date,
+            end_date,
         )?;
         let total_mouse_actions = scalar_count(
             &connection,
-            "SELECT COALESCE(SUM(action_count), 0) FROM mouse_stats WHERE stat_date = ?1",
-            date,
+            "SELECT COALESCE(SUM(action_count), 0) FROM mouse_stats WHERE stat_date BETWEEN ?1 AND ?2",
+            start_date,
+            end_date,
         )?;
 
         let mut key_query = connection
             .prepare(
                 "
                 SELECT key_id, key_label, SUM(press_count) AS total
-                FROM key_stats WHERE stat_date = ?1
+                FROM key_stats WHERE stat_date BETWEEN ?1 AND ?2
                 GROUP BY key_id, key_label ORDER BY total DESC, key_id ASC
                 ",
             )
             .map_err(|error| error.to_string())?;
         let keys = key_query
-            .query_map(params![date], |row| {
+            .query_map(params![start_date, end_date], |row| {
                 Ok(KeyStat {
                     key_id: row.get(0)?,
                     label: row.get(1)?,
@@ -186,13 +194,13 @@ impl StatsStore {
             .prepare(
                 "
                 SELECT action_id, action_label, SUM(action_count) AS total
-                FROM mouse_stats WHERE stat_date = ?1
+                FROM mouse_stats WHERE stat_date BETWEEN ?1 AND ?2
                 GROUP BY action_id, action_label ORDER BY total DESC, action_id ASC
                 ",
             )
             .map_err(|error| error.to_string())?;
         let mouse = mouse_query
-            .query_map(params![date], |row| {
+            .query_map(params![start_date, end_date], |row| {
                 Ok(MouseStat {
                     action_id: row.get(0)?,
                     label: row.get(1)?,
@@ -209,16 +217,16 @@ impl StatsStore {
                 "
                 SELECT stat_hour, SUM(total) FROM (
                     SELECT stat_hour, SUM(press_count) AS total FROM key_stats
-                    WHERE stat_date = ?1 GROUP BY stat_hour
+                    WHERE stat_date BETWEEN ?1 AND ?2 GROUP BY stat_hour
                     UNION ALL
                     SELECT stat_hour, SUM(action_count) AS total FROM mouse_stats
-                    WHERE stat_date = ?1 GROUP BY stat_hour
+                    WHERE stat_date BETWEEN ?1 AND ?2 GROUP BY stat_hour
                 ) GROUP BY stat_hour ORDER BY stat_hour
                 ",
             )
             .map_err(|error| error.to_string())?;
         let rows = activity_query
-            .query_map(params![date], |row| {
+            .query_map(params![start_date, end_date], |row| {
                 Ok((row.get::<_, u8>(0)?, row.get::<_, i64>(1)?.max(0) as u64))
             })
             .map_err(|error| error.to_string())?;
@@ -230,7 +238,7 @@ impl StatsStore {
         }
 
         Ok(DashboardData {
-            date: date.to_string(),
+            date: end_date.to_string(),
             total_key_presses,
             total_mouse_actions,
             keys,
@@ -254,9 +262,28 @@ impl StatsStore {
     }
 }
 
-fn scalar_count(connection: &Connection, query: &str, date: &str) -> Result<u64, String> {
+fn range_bounds(range: &str) -> Result<(NaiveDate, NaiveDate), String> {
+    let today = Local::now().date_naive();
+    let start = match range {
+        "today" => today,
+        "week" => today - Duration::days(today.weekday().num_days_from_monday() as i64),
+        "month" => NaiveDate::from_ymd_opt(today.year(), today.month(), 1)
+            .ok_or_else(|| "could not calculate current month".to_string())?,
+        _ => return Err(format!("unsupported dashboard range: {range}")),
+    };
+    Ok((start, today))
+}
+
+fn scalar_count(
+    connection: &Connection,
+    query: &str,
+    start_date: &str,
+    end_date: &str,
+) -> Result<u64, String> {
     connection
-        .query_row(query, params![date], |row| row.get::<_, i64>(0))
+        .query_row(query, params![start_date, end_date], |row| {
+            row.get::<_, i64>(0)
+        })
         .map(|value| value.max(0) as u64)
         .map_err(|error| error.to_string())
 }
@@ -277,7 +304,7 @@ mod tests {
             .record_mouse_at("2026-09-04", 10, "left-click", "左键")
             .unwrap();
 
-        let dashboard = store.dashboard_for("2026-09-04").unwrap();
+        let dashboard = store.dashboard_between("2026-09-04", "2026-09-04").unwrap();
         assert_eq!(dashboard.total_key_presses, 3);
         assert_eq!(dashboard.total_mouse_actions, 1);
         assert_eq!(dashboard.keys[0].key_id, "a");
@@ -295,10 +322,23 @@ mod tests {
             .unwrap();
         store.clear().unwrap();
 
-        let dashboard = store.dashboard_for("2026-09-04").unwrap();
+        let dashboard = store.dashboard_between("2026-09-04", "2026-09-04").unwrap();
         assert_eq!(dashboard.total_key_presses, 0);
         assert_eq!(dashboard.total_mouse_actions, 0);
         assert!(dashboard.keys.is_empty());
         assert!(dashboard.mouse.is_empty());
+    }
+
+    #[test]
+    fn range_query_includes_all_days_inclusive() {
+        let store = StatsStore::open_in_memory().expect("database should initialize");
+        store.record_key_at("2026-09-01", 8, "a", "A").unwrap();
+        store.record_key_at("2026-09-03", 9, "b", "B").unwrap();
+        store.record_key_at("2026-09-04", 9, "c", "C").unwrap();
+
+        let dashboard = store.dashboard_between("2026-09-01", "2026-09-03").unwrap();
+        assert_eq!(dashboard.total_key_presses, 2);
+        assert_eq!(dashboard.activity[8].count, 1);
+        assert_eq!(dashboard.activity[9].count, 1);
     }
 }
