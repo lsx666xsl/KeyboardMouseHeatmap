@@ -9,10 +9,11 @@
  *  - mahjong    sharp wooden tile snap
  *  - chick      playful "ji-ji-ji" chirp (internet-meme homage, fully synthesized)
  *  - blub       underwater gurgle: a string of rising wet bubbles
+ *  - jntm       synthesized hum of the "ji ni tai mei" meme phrase (no samples)
  * The main window plays one click per accepted physical key press (driven by
  * keyshow-event), so repeats and injected events never fire sounds.
  */
-export type SoundVoice = "off" | "click" | "typewriter" | "bubble" | "blub" | "bell" | "mahjong" | "chick";
+export type SoundVoice = "off" | "click" | "typewriter" | "bubble" | "blub" | "bell" | "mahjong" | "chick" | "jntm";
 
 let ctx: AudioContext | null = null;
 let voice: SoundVoice = "off";
@@ -126,6 +127,42 @@ export function playKeySound(heavy: boolean) {
       osc.stop(now + 0.55);
     }
     tone(ac, now, base / 2, 0.1, v * 0.12, "sine");
+  } else if (voice === "jntm") {
+    // "ji ni tai mei" hum: four syllables sung twice, electro-vocal timbre.
+    // Pure synthesis (saw + triangle through a lowpass), no audio samples.
+    const beat = heavy ? 0.125 : 0.1;
+    const root = heavy ? 320 : 400; // lower & sillier on heavy keys
+    // syllable pitch contour: ji ni tai mei -> ji ni tai mei
+    const contour = [1, 1.12, 1.26, 1.12, 1, 1.12, 1.26, 1.02];
+    const sing = (at: number, freq: number, dur: number, peak: number, bend: number) => {
+      const filter = ac.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.value = 1500;
+      const osc = ac.createOscillator();
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(freq * 0.97, at);
+      osc.frequency.exponentialRampToValueAtTime(freq * bend, at + dur * 0.6);
+      // vibrato on sustained notes
+      const lfo = ac.createOscillator();
+      lfo.frequency.value = 5.5;
+      const lfoGain = ac.createGain();
+      lfoGain.gain.value = freq * 0.012;
+      lfo.connect(lfoGain).connect(osc.frequency);
+      const gain = ac.createGain();
+      gain.gain.setValueAtTime(0.0001, at);
+      gain.gain.exponentialRampToValueAtTime(v * peak * MASTER_GAIN, at + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+      osc.connect(filter).connect(gain).connect(ac.destination);
+      osc.start(at); osc.stop(at + dur + 0.03);
+      lfo.start(at); lfo.stop(at + dur + 0.03);
+    };
+    contour.forEach((ratio, i) => {
+      const at = now + i * beat;
+      const isLast = i === contour.length - 1;
+      sing(at, root * ratio, isLast ? beat * 2.4 : beat * 0.8, 0.4, isLast ? 0.82 : 1.04);
+    });
+    // soft bass thump to keep it bouncy
+    tone(ac, now, root * 0.5, beat * 0.9, v * 0.18, "sine");
   } else if (voice === "blub") {
     // underwater gurgle: wet rising bubbles with a low watery filter
     const bubbles = heavy ? 6 : 4;
