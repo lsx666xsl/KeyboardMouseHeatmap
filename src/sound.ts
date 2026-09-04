@@ -5,12 +5,12 @@
  *  - click      mechanical blue-switch tick (noise burst + body thump)
  *  - typewriter crisp high tick
  *  - bubble     soft rising chirp
- *  - firecracker a rapid string of tiny crackles (festive)
+ *  - bell       soft wind-chime ding (bright but gentle)
  *  - mahjong    sharp wooden tile snap
  * The main window plays one click per accepted physical key press (driven by
  * keyshow-event), so repeats and injected events never fire sounds.
  */
-export type SoundVoice = "off" | "click" | "typewriter" | "bubble" | "firecracker" | "mahjong";
+export type SoundVoice = "off" | "click" | "typewriter" | "bubble" | "bell" | "mahjong";
 
 let ctx: AudioContext | null = null;
 let voice: SoundVoice = "off";
@@ -109,16 +109,21 @@ export function playKeySound(heavy: boolean) {
     osc.connect(gain).connect(ac.destination);
     osc.start(t0);
     osc.stop(t0 + 0.11);
-  } else if (voice === "firecracker") {
-    // a rapid string of crackles, louder/longer on heavy keys
-    const pops = heavy ? 7 : 4;
-    for (let i = 0; i < pops; i++) {
-      const at = now + i * (heavy ? 0.05 : 0.035);
-      noiseBurst(ac, at, 0.008, 2600 + Math.random() * 2200, v * (0.55 - i * 0.05));
-      tone(ac, at, 500 + Math.random() * 900, 0.018, v * 0.14, "square");
+  } else if (voice === "bell") {
+    // wind chime: layered sine partials with long decay; deep keys ring lower
+    const base = heavy ? 1320 : 1760;
+    for (const [ratio, peak] of [[1, 0.5], [2.76, 0.2], [5.4, 0.1]] as Array<[number, number]>) {
+      const osc = ac.createOscillator();
+      osc.type = "sine";
+      osc.frequency.value = base * ratio;
+      const gain = ac.createGain();
+      gain.gain.setValueAtTime(v * peak * MASTER_GAIN, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + (heavy ? 0.5 : 0.32));
+      osc.connect(gain).connect(ac.destination);
+      osc.start(now);
+      osc.stop(now + 0.55);
     }
-    // trailing sizzle
-    noiseBurst(ac, now + pops * 0.05, 0.05, 4200, v * 0.12, 2.2);
+    tone(ac, now, base / 2, 0.1, v * 0.12, "sine");
   } else if (voice === "mahjong") {
     // sharp wooden tile snap: dense low-mid click + short body
     noiseBurst(ac, now, heavy ? 0.02 : 0.013, heavy ? 900 : 1300, v * (heavy ? 0.95 : 0.75), 1.6);

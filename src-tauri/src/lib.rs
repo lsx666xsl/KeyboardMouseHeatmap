@@ -639,40 +639,113 @@ fn set_app_behavior(app: tauri::AppHandle, start: String, close: String) -> Resu
 const AUTOSTART_REG_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 const AUTOSTART_VALUE: &str = "KeyPulse";
 
+/// Register/unregister the Run key through the native registry API
+/// (avoids shell/quoting pitfalls of spawning `reg.exe`).
+fn set_autostart_registry(enabled: bool) -> Result<(), String> {
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::WIN32_ERROR;
+    use windows::Win32::System::Registry::{
+        RegCloseKey, RegDeleteValueW, RegOpenKeyExW, RegSetValueExW, HKEY, HKEY_CURRENT_USER,
+        KEY_SET_VALUE, REG_SZ,
+    };
+
+    fn wide(value: &str) -> Vec<u16> {
+        value.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    let sub_key = wide(AUTOSTART_REG_KEY);
+    let mut key: HKEY = HKEY::default();
+    let opened = unsafe {
+        RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            PCWSTR(sub_key.as_ptr()),
+            None,
+            KEY_SET_VALUE,
+            &mut key,
+        )
+    };
+    if opened != WIN32_ERROR(0) {
+        return Err(format!("cannot open Run key (error {opened:?})"));
+    }
+    let name = wide(AUTOSTART_VALUE);
+    let code = if enabled {
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let value = format!("\"{}\" --autostart", exe.display());
+        let data = wide(&value);
+        unsafe {
+            RegSetValueExW(
+                key,
+                PCWSTR(name.as_ptr()),
+                None,
+                REG_SZ,
+                Some(bytemuck_bytes_of_utf16(&data)),
+            )
+        }
+    } else {
+        unsafe { RegDeleteValueW(key, PCWSTR(name.as_ptr())) }
+    };
+    let _ = unsafe { RegCloseKey(key) };
+    if code != WIN32_ERROR(0) {
+        return Err(format!("registry update failed (error {code:?})"));
+    }
+    Ok(())
+}
+
+/// The Run value is stored as a UTF-16 byte slice for RegSetValueExW.
+fn bytemuck_bytes_of_utf16(data: &[u16]) -> &[u8] {
+    // SAFETY: u16 slice is 2-byte aligned; converting to bytes is sound.
+    unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 2) }
+}
+
+fn autostart_registry_enabled() -> bool {
+    use windows::core::PCWSTR;
+    use windows::Win32::System::Registry::{
+        RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_CURRENT_USER, KEY_QUERY_VALUE,
+    };
+
+    fn wide(value: &str) -> Vec<u16> {
+        value.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    let sub_key = wide(AUTOSTART_REG_KEY);
+    let mut key: HKEY = HKEY::default();
+    let opened = unsafe {
+        RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            PCWSTR(sub_key.as_ptr()),
+            None,
+            KEY_QUERY_VALUE,
+            &mut key,
+        )
+    };
+    if opened.0 != 0 {
+        return false;
+    }
+    let name = wide(AUTOSTART_VALUE);
+    let mut buf = [0u16; 1024];
+    let mut size = (buf.len() * 2) as u32;
+    let result = unsafe {
+        RegQueryValueExW(
+            key,
+            PCWSTR(name.as_ptr()),
+            None,
+            None,
+            Some(buf.as_mut_ptr() as *mut u8),
+            Some(&mut size),
+        )
+    };
+    let _ = unsafe { RegCloseKey(key) };
+    result.0 == 0
+}
+
 #[tauri::command]
-fn set_autostart(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let quoted = format!("\"{}\" --autostart", exe.display());
-    let mut command = std::process::Command::new("reg");
-    if enabled {
-        command.args([
-            "add",
-            AUTOSTART_REG_KEY,
-            "/v",
-            AUTOSTART_VALUE,
-            "/t",
-            "REG_SZ",
-            "/d",
-            &quoted,
-            "/f",
-        ]);
-    } else {
-        command.args(["delete", AUTOSTART_REG_KEY, "/v", AUTOSTART_VALUE, "/f"]);
-    }
-    let output = command.output().map_err(|e| e.to_string())?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
-    }
+fn set_autostart(_app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    set_autostart_registry(enabled)
 }
 
 #[tauri::command]
 fn get_autostart() -> bool {
-    let output = std::process::Command::new("reg")
-        .args(["query", AUTOSTART_REG_KEY, "/v", AUTOSTART_VALUE])
-        .output();
-    matches!(output, Ok(out) if out.status.success())
+    autostart_registry_enabled()
 }
 
 /// One-time move of the legacy %APPDATA% store into the portable folder.
