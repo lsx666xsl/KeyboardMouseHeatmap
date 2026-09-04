@@ -269,18 +269,40 @@ function routeEvent(event: KeyShowEvent) {
   onSpringEvent(event);
 }
 
-// ---------- mirror keyboard layout ----------
-const mirrorRows: { label: string; keyId: string; width?: number }[][] = [
-  ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"].map((l) => ({ label: l, keyId: l.toLowerCase() })),
-  ["A", "S", "D", "F", "G", "H", "J", "K", "L"].map((l) => ({ label: l, keyId: l.toLowerCase() })),
-  ["Z", "X", "C", "V", "B", "N", "M"].map((l) => ({ label: l, keyId: l.toLowerCase() })),
-  [
-    { label: "Ctrl", keyId: "ctrl-left" },
-    { label: "Alt", keyId: "alt-left" },
-    { label: "Space", keyId: "space", width: 5 },
-    { label: "⌫", keyId: "backspace" },
-    { label: "Enter", keyId: "enter" },
-  ],
+// ---------- mirror keyboard layout: full 104 keys (ANSI) ----------
+type MirrorKey = { label: string; keyId: string; w?: number; fn?: boolean };
+const K = (label: string, keyId: string, w?: number, fn?: boolean): MirrorKey => ({ label, keyId, w, fn });
+const mirrorMain: MirrorKey[][] = [
+  // row 0: escape + function keys
+  [K("Esc", "escape"), ...Array.from({ length: 12 }, (_, i) => K(`F${i + 1}`, `f${i + 1}`, 1, true))],
+  // row 1: backquote + digits + minus/equal/backspace
+  [K("`", "backquote"), ...Array.from({ length: 10 }, (_, i) => K(String(i), String(i))),
+    K("-", "minus"), K("=", "equal"), K("⌫", "backspace", 2)],
+  // row 2: tab + QWERTYUIOP[]\
+  [K("Tab", "tab", 1.5), ..."QWERTYUIOP".split("").map((l) => K(l, l.toLowerCase())),
+    K("[", "bracket-left"), K("]", "bracket-right"), K("\\", "backslash", 1.5)].flat(),
+  // row 3: caps + ASDFGHJKL;' + enter
+  [K("Caps", "caps-lock", 1.8), "ASDFGHJKL".split("").map((l) => K(l, l.toLowerCase())),
+    K(";", "semicolon"), K("'", "quote"), K("Enter", "enter", 2.2)].flat(),
+  // row 4: shift + ZXCVBNM,./ + shift
+  [K("Shift", "shift-left", 2.3), "ZXCVBNM".split("").map((l) => K(l, l.toLowerCase())),
+    K(",", "comma"), K(".", "period"), K("/", "slash"), K("Shift", "shift-right", 2.8)].flat(),
+  // row 5: ctrl win alt space alt menu ctrl
+  [K("Ctrl", "ctrl-left", 1.5), K("Win", "win-left"), K("Alt", "alt-left", 1.3),
+    K("Space", "space", 6.5), K("Alt", "alt-right", 1.3), K("Fn", "fn", 1.1, true),
+    K("≣", "menu"), K("Ctrl", "ctrl-right", 1.5)],
+];
+const mirrorSide: { title: string; keys: MirrorKey[] }[] = [
+  { title: "编辑", keys: [K("Ins", "insert"), K("Home", "home"), K("PgUp", "page-up")] },
+  { title: "", keys: [K("Del", "delete"), K("End", "end"), K("PgDn", "page-down")] },
+  { title: "方向", keys: [K("↑", "arrow-up"), K("←", "arrow-left"), K("↓", "arrow-down"), K("→", "arrow-right")] },
+  { title: "数字", keys: [
+    K("Num", "num-lock", 1, true), K("÷", "numpad-divide", 1, true), K("×", "numpad-multiply", 1, true), K("−", "numpad-subtract", 1, true),
+    K("7", "numpad-7"), K("8", "numpad-8"), K("9", "numpad-9"), K("+", "numpad-add", 1, true),
+    K("4", "numpad-4"), K("5", "numpad-5"), K("6", "numpad-6"), K("", "numpad-6", 0, true),
+    K("1", "numpad-1"), K("2", "numpad-2"), K("3", "numpad-3"), K("", "", 0, true),
+    K("0", "numpad-0", 1), K(".", "numpad-decimal"), K("↵", "numpad-enter", 2, true),
+  ] },
 ];
 
 function isKeyLit(keyId: string) {
@@ -433,11 +455,21 @@ onUnmounted(() => {
       <div v-for="spring in springs" :key="spring.id" class="fx-spring"><span>{{ spring.label }}</span></div>
     </div>
 
-    <!-- 迷你键盘镜像 -->
+    <!-- 迷你键盘镜像（104 全键位） -->
     <div v-if="mode === 'mirror'" class="mirror-stage" aria-hidden="true">
       <div class="mirror-board">
-        <div v-for="(row, rowIndex) in mirrorRows" :key="rowIndex" class="mirror-row">
-          <div v-for="key in row" :key="key.keyId" class="mirror-key" :class="{ lit: isKeyLit(key.keyId), wide: key.width }">{{ key.label }}</div>
+        <div class="mirror-main">
+          <div v-for="(row, rowIndex) in mirrorMain" :key="rowIndex" class="mirror-row">
+            <div v-for="key in row" :key="key.keyId" class="mirror-key" :class="{ lit: isKeyLit(key.keyId), wide: key.w, fn: key.fn }">{{ key.label }}</div>
+          </div>
+        </div>
+        <div class="mirror-side">
+          <div v-for="(group, groupIndex) in mirrorSide" :key="groupIndex" class="mirror-group">
+            <small>{{ group.title }}</small>
+            <div class="mirror-row">
+              <div v-for="key in group.keys" :key="key.keyId || groupIndex + key.label" class="mirror-key side" :class="{ lit: isKeyLit(key.keyId), wide: key.w, blank: !key.keyId }">{{ key.label }}</div>
+            </div>
+          </div>
         </div>
       </div>
       <div class="mirror-chips">
@@ -514,10 +546,17 @@ onUnmounted(() => {
 @keyframes spring-bounce { 0% { transform: translate(-50%, 0) scaleY(.6); opacity: 0; } 16% { opacity: 1; transform: translate(-50%, -78px) scaleY(1.05); } 34% { transform: translate(-50%, 0) scaleY(.94); } 52% { transform: translate(-50%, -40px) scaleY(1); } 70% { transform: translate(-50%, 0) scaleY(.97); } 100% { transform: translate(-50%, -8px) scaleY(.9); opacity: 0; } }
 
 /* ---------- mirror keyboard ---------- */
-.mirror-board { display: flex; flex-direction: column; gap: 5px; padding: 9px 10px; border-radius: 12px; background: rgba(4, 9, 24, .5); box-shadow: 0 10px 26px rgba(0,0,0,.3), inset 0 0 0 1px rgba(148,163,184,.14); }
-.mirror-row { display: flex; gap: 5px; justify-content: center; }
-.mirror-key { display: grid; place-items: center; width: 38px; height: 30px; border-radius: 6px; color: rgba(226, 232, 240, .45); background: rgba(30, 41, 59, .55); font-size: 11px; font-weight: 700; transition: all .12s ease; box-shadow: inset 0 0 0 1px rgba(148,163,184,.1); }
-.mirror-key.wide { width: 150px; }
+.mirror-board { display: flex; gap: 7px; padding: 8px 9px; border-radius: 12px; background: rgba(4, 9, 24, .5); box-shadow: 0 10px 26px rgba(0,0,0,.3), inset 0 0 0 1px rgba(148,163,184,.14); }
+.mirror-main { display: flex; flex-direction: column; gap: 4px; }
+.mirror-side { display: flex; flex-direction: column; justify-content: space-between; gap: 4px; border-left: 1px solid rgba(148,163,184,.14); padding-left: 7px; }
+.mirror-group small { display: block; margin: 0 0 3px; color: var(--tx-faint); font-size: 7px; text-align: center; letter-spacing: .08em; }
+.mirror-group > .mirror-row { flex-wrap: wrap; justify-content: center; }
+.mirror-row { display: flex; gap: 3px; justify-content: center; }
+.mirror-key { display: grid; place-items: center; width: 25px; height: 19px; border-radius: 4px; color: rgba(226, 232, 240, .5); background: rgba(30, 41, 59, .6); font-size: 7.5px; font-weight: 700; transition: all .12s ease; box-shadow: inset 0 0 0 1px rgba(148,163,184,.1); }
+.mirror-key.wide { width: auto; flex: 1 1 auto; }
+.mirror-key.side { width: 24px; }
+.mirror-key.fn { font-size: 6.5px; }
+.mirror-key.blank { opacity: 0; box-shadow: none; }
 .mirror-key.lit { color: #fff; background: linear-gradient(180deg, rgba(var(--cyan-rgb),.9), rgba(var(--violet-rgb),.75)); box-shadow: 0 0 16px rgba(var(--cyan-rgb),.9), inset 0 0 0 1px rgba(255,255,255,.35); transform: translateY(-1px); }
 .mirror-chips { display: flex; gap: 4px; max-width: 90%; overflow: hidden; }
 .mirror-chip { padding: 2px 7px; border-radius: 5px; color: #dbe4f3; background: rgba(15, 23, 42, .66); font-size: 10px; font-weight: 700; white-space: nowrap; animation: chip-in .16s ease; }

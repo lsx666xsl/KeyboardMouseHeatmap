@@ -227,7 +227,8 @@ fn keyshow_bounds(
     width: f64,
     height: f64,
 ) -> (f64, f64) {
-    let margin = 24.0 * scale;
+    // snug against the screen edge so corner presets feel truly cornered
+    let margin = 10.0 * scale;
     let left = area.position.x as f64 + margin;
     let right = area.position.x as f64 + area.size.width as f64 - width - margin;
     let top = area.position.y as f64 + margin;
@@ -302,7 +303,7 @@ fn build_mini_overlay(app: &tauri::App) -> tauri::Result<()> {
     if let Some(monitor) = mini.primary_monitor()? {
         let area = monitor.work_area();
         let scale = monitor.scale_factor();
-        let margin = 16.0 * scale;
+        let margin = 10.0 * scale;
         let width = 230.0 * scale;
         let height = 92.0 * scale;
         let x = area.position.x as f64 + area.size.width as f64 - width - margin;
@@ -561,6 +562,111 @@ fn get_data_location(app: tauri::AppHandle) -> Result<String, String> {
     ))
 }
 
+/// Launch & close preferences shared with the frontend.
+/// start: "normal" | "minimized" | "tray"   (tray hides the main window)
+/// close: "tray" | "minimize" | "quit"
+#[derive(Default)]
+pub struct AppBehavior {
+    pub start: Mutex<String>,
+    pub close: Mutex<String>,
+}
+
+impl AppBehavior {
+    fn load(app: &impl tauri::Manager<tauri::Wry>) -> Self {
+        let file = preferences_path(app);
+        let mut behavior = Self::default();
+        if let Ok(raw) = std::fs::read_to_string(&file) {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) {
+                if let Some(b) = value.get("appBehavior") {
+                    if let Some(v) = b.get("start").and_then(|x| x.as_str()) {
+                        *behavior.start.lock().unwrap() = v.to_string();
+                    }
+                    if let Some(v) = b.get("close").and_then(|x| x.as_str()) {
+                        *behavior.close.lock().unwrap() = v.to_string();
+                    }
+                }
+            }
+        }
+        behavior
+    }
+
+    fn save(app: &impl tauri::Manager<tauri::Wry>, start: &str, close: &str) -> Result<(), String> {
+        let file = preferences_path(app);
+        if let Some(parent) = file.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let mut value = if let Ok(raw) = std::fs::read_to_string(&file) {
+            serde_json::from_str::<serde_json::Value>(&raw).unwrap_or_else(|_| serde_json::json!({}))
+        } else {
+            serde_json::json!({})
+        };
+        value["appBehavior"] = serde_json::json!({ "start": start, "close": close });
+        std::fs::write(&file, serde_json::to_string_pretty(&value).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())
+    }
+}
+
+#[tauri::command]
+fn get_app_behavior(app: tauri::AppHandle) -> (String, String) {
+    let state = app.state::<AppBehavior>();
+    let start = state.start.lock().map(|s| s.clone()).unwrap_or_else(|_| "normal".into());
+    let close = state.close.lock().map(|s| s.clone()).unwrap_or_else(|_| "tray".into());
+    (start, close)
+}
+
+#[tauri::command]
+fn set_app_behavior(app: tauri::AppHandle, start: String, close: String) -> Result<(), String> {
+    if !["normal", "minimized", "tray"].contains(&start.as_str()) {
+        return Err(format!("unsupported start behavior: {start}"));
+    }
+    if !["tray", "minimize", "quit"].contains(&close.as_str()) {
+        return Err(format!("unsupported close behavior: {close}"));
+    }
+    let state = app.state::<AppBehavior>();
+    *state.start.lock().map_err(|_| "poisoned".to_string())? = start.clone();
+    *state.close.lock().map_err(|_| "poisoned".to_string())? = close.clone();
+    AppBehavior::save(&app, &start, &close)
+}
+
+const AUTOSTART_REG_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+const AUTOSTART_VALUE: &str = "KeyPulse";
+
+#[tauri::command]
+fn set_autostart(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let quoted = format!("\"{}\" --autostart", exe.display());
+    let mut command = std::process::Command::new("reg");
+    if enabled {
+        command.args([
+            "add",
+            AUTOSTART_REG_KEY,
+            "/v",
+            AUTOSTART_VALUE,
+            "/t",
+            "REG_SZ",
+            "/d",
+            &quoted,
+            "/f",
+        ]);
+    } else {
+        command.args(["delete", AUTOSTART_REG_KEY, "/v", AUTOSTART_VALUE, "/f"]);
+    }
+    let output = command.output().map_err(|e| e.to_string())?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
+}
+
+#[tauri::command]
+fn get_autostart() -> bool {
+    let output = std::process::Command::new("reg")
+        .args(["query", AUTOSTART_REG_KEY, "/v", AUTOSTART_VALUE])
+        .output();
+    matches!(output, Ok(out) if out.status.success())
+}
+
 /// One-time move of the legacy %APPDATA% store into the portable folder.
 /// Only runs when no explicit dataLocation preference exists yet.
 fn migrate_legacy_store_if_needed(app: &tauri::App) -> Result<(), String> {
@@ -624,6 +730,21 @@ pub fn run() {
 
             app.manage(KeyshowPrefs::default());
             app.manage(pk::PkState::default());
+            let behavior = AppBehavior::load(app);
+            let is_autostart = std::env::args().any(|arg| arg == "--autostart");
+            let start_kind = if is_autostart { "tray".to_string() } else {
+                behavior.start.lock().map(|s| s.clone()).unwrap_or_else(|_| "normal".into())
+            };
+            if start_kind != "normal" {
+                if let Some(window) = app.get_webview_window("main") {
+                    if start_kind == "tray" || is_autostart {
+                        let _ = window.hide();
+                    } else {
+                        let _ = window.minimize();
+                    }
+                }
+            }
+            app.manage(behavior);
             build_keyshow_overlay(app)?;
             build_mini_overlay(app)?;
             apply_keyshow_layout(app.handle()).map_err(std::io::Error::other)?;
@@ -650,6 +771,10 @@ pub fn run() {
             save_footprint_png,
             get_pk_profile,
             pk_record_result,
+            get_app_behavior,
+            set_app_behavior,
+            set_autostart,
+            get_autostart,
             pk::pk_start,
             pk::pk_challenge,
             pk::pk_report,
@@ -658,8 +783,26 @@ pub fn run() {
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+                let behavior = window
+                    .app_handle()
+                    .try_state::<AppBehavior>()
+                    .map(|state| {
+                        state.close.lock().map(|c| c.clone()).unwrap_or_else(|_| "tray".into())
+                    })
+                    .unwrap_or_else(|| "tray".into());
+                match behavior.as_str() {
+                    "quit" => {
+                        window.app_handle().exit(0);
+                    }
+                    "minimize" => {
+                        api.prevent_close();
+                        let _ = window.minimize();
+                    }
+                    _ => {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
+                }
             }
         })
         .run(tauri::generate_context!())
