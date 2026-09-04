@@ -4,12 +4,17 @@
  * Run:  npm install ws && node pk-cloud-server.js   (PORT env, default 7788)
  *
  * REST API (JSON):
- *   POST /api/register      { name, pass }            -> { ok, token?, error? }
- *   POST /api/login         { name, pass }            -> { ok, token, profile? } | { ok:false, error }
- *   GET  /api/me?token=..                            -> { name, best, wins, losses, games }
- *   POST /api/result        { token, win, score }     -> updated profile
- *   GET  /api/leaderboard                             -> [{ name, best, wins, losses, games }] top 50
+ *   POST /api/register      { name, pass }             -> { ok, token?, error? }
+ *   POST /api/login         { name, pass }             -> { ok, token, profile? }
+ *   GET  /api/me?token=..                             -> profile with day stats
+ *   POST /api/stats         { token, date, keys, mouse }  upsert daily totals
+ *   POST /api/result        { token, win, score }      -> PK stats (optional)
+ *   GET  /api/leaderboard?sort=total|today|days|streak -> typing leaderboard
  *   POST /api/logout        { token }
+ *
+ * Leaderboard is about input data (total keys / today / active days / streak),
+ * not real-time dueling: clients report their daily aggregate and the server
+ * ranks everyone who plays. (A WS relay still exists for future duels.)
  *
  * WebSocket (duel relay, room of 2):
  *   join with ?token= and room:  ws://host:PORT/ws?token=..&room=any
@@ -31,7 +36,7 @@ const PORT = Number(process.env.PULSE_PORT || 7788);
 const DATA_FILE = path.join(__dirname, "users.json");
 const DURATION = 60;
 
-let users = {}; // name -> { salt, hash, best, wins, losses, games }
+let users = {}; // name -> { salt, hash, best, wins, losses, games, days: {date:{k,m}} }
 let sessions = new Map(); // token -> name
 const rooms = new Map(); // roomId -> { players: Map<ws,{name,count}>, timer }
 
@@ -48,10 +53,29 @@ function saveUsers() {
 function hashPass(pass, salt) {
   return crypto.createHash("sha256").update(salt + ":" + pass).digest("hex");
 }
+function dayStats(profile) {
+  const days = profile.days || {};
+  const entries = Object.entries(days).sort((a, b) => (a[0] < b[0] ? -1 : 1));
+  const totalKeys = entries.reduce((s, [, d]) => s + (d.k || 0), 0);
+  const totalMouse = entries.reduce((s, [, d]) => s + (d.m || 0), 0);
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const today = days[todayKey] || { k: 0, m: 0 };
+  // streak: consecutive days ending today (or yesterday)
+  let streak = 0;
+  const cursor = new Date();
+  if (!days[cursor.toISOString().slice(0, 10)]) cursor.setDate(cursor.getDate() - 1);
+  while (days[cursor.toISOString().slice(0, 10)]) {
+    streak += 1;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return { totalKeys, totalMouse, activeDays: entries.length, streak, todayKeys: today.k || 0, todayMouse: today.m || 0, lastActive: entries.length ? entries[entries.length - 1][0] : null };
+}
+
 function publicProfile(name) {
   const u = users[name];
   if (!u) return null;
-  return { name, best: u.best, wins: u.wins, losses: u.losses, games: u.games };
+  const derived = dayStats(u);
+  return { name, best: u.best || 0, wins: u.wins || 0, losses: u.losses || 0, games: u.games || 0, ...derived };
 }
 
 function json(res, code, body) {
@@ -90,7 +114,7 @@ const server = http.createServer(async (req, res) => {
       }
       if (users[clean]) return json(res, 409, { ok: false, error: "该昵称已被注册" });
       const salt = crypto.randomBytes(8).toString("hex");
-      users[clean] = { salt, hash: hashPass(pass, salt), best: 0, wins: 0, losses: 0, games: 0 };
+      users[clean] = { salt, hash: hashPass(pass, salt), best: 0, wins: 0, losses: 0, games: 0, days: {} };
       saveUsers();
       const token = crypto.randomBytes(16).toString("hex");
       sessions.set(token, clean);
@@ -113,6 +137,18 @@ const server = http.createServer(async (req, res) => {
       if (!name) return json(res, 401, { ok: false, error: "未登录或登录已过期" });
       return json(res, 200, { ok: true, profile: publicProfile(name) });
     }
+    if (route === "/api/stats" && req.method === "POST") {
+      const { token, date, keys, mouse } = await readBody(req);
+      const name = sessions.get(String(token || ""));
+      if (!name) return json(res, 401, { ok: false, error: "未登录" });
+      const day = String(date || new Date().toISOString().slice(0, 10)).slice(0, 10);
+      const u = users[name];
+      u.days = u.days || {};
+      const prev = u.days[day] || { k: 0, m: 0 };
+      u.days[day] = { k: Math.max(prev.k, Number(keys) || 0), m: Math.max(prev.m, Number(mouse) || 0) };
+      saveUsers();
+      return json(res, 200, { ok: true, profile: publicProfile(name) });
+    }
     if (route === "/api/result" && req.method === "POST") {
       const { token, win, score } = await readBody(req);
       const name = sessions.get(String(token || ""));
@@ -125,12 +161,18 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { ok: true, profile: publicProfile(name) });
     }
     if (route === "/api/leaderboard") {
-      const list = Object.values(users)
-        .map((u, i) => ({ name: Object.keys(users)[i], ...u }))
-        .sort((a, b) => b.best - a.best || b.wins - a.wins)
-        .slice(0, 50)
-        .map((u) => ({ name: u.name, best: u.best, wins: u.wins, losses: u.losses, games: u.games }));
-      return json(res, 200, { ok: true, list });
+      const sortBy = url.searchParams.get("sort") || "total";
+      const rows = Object.keys(users).map((name) => {
+        const profile = publicProfile(name);
+        return { name, best: profile.best, wins: profile.wins, losses: profile.losses, games: profile.games, totalKeys: profile.totalKeys, totalMouse: profile.totalMouse, activeDays: profile.activeDays, streak: profile.streak, todayKeys: profile.todayKeys, lastActive: profile.lastActive };
+      });
+      rows.sort((a, b) => {
+        if (sortBy === "today") return b.todayKeys - a.todayKeys || b.totalKeys - a.totalKeys;
+        if (sortBy === "days") return b.activeDays - a.activeDays || b.totalKeys - a.totalKeys;
+        if (sortBy === "streak") return b.streak - a.streak || b.totalKeys - a.totalKeys;
+        return b.totalKeys - a.totalKeys || b.activeDays - a.activeDays;
+      });
+      return json(res, 200, { ok: true, list: rows.slice(0, 100) });
     }
     if (route === "/api/logout" && req.method === "POST") {
       const { token } = await readBody(req);

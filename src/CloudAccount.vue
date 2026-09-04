@@ -4,7 +4,7 @@
  * its result to the cloud afterwards. */
 import { onMounted, ref } from "vue";
 
-type CloudProfile = { name: string; best: number; wins: number; losses: number; games: number };
+type CloudProfile = { name: string; best: number; wins: number; losses: number; games: number; totalKeys: number; totalMouse: number; activeDays: number; streak: number; todayKeys: number };
 
 const server = ref(localStorage.getItem("kp-cloud-server") || "http://127.0.0.1:7788");
 const cloudName = ref(localStorage.getItem("kp-cloud-name") || "");
@@ -65,6 +65,7 @@ async function submitAuth() {
       profile.value = res.profile ?? null;
       formPass.value = "";
       notice.value = mode.value === "register" ? "注册成功，已登录" : "登录成功";
+      await refreshBoard();
     } else {
       notice.value = res.error || "请求失败";
     }
@@ -82,7 +83,32 @@ async function logout() {
   notice.value = "已退出登录";
 }
 
-onMounted(refreshProfile);
+type BoardRow = { name: string; totalKeys: number; totalMouse: number; activeDays: number; streak: number; todayKeys: number };
+const boardSorts = [
+  { id: "total", name: "总按键" },
+  { id: "today", name: "今日" },
+  { id: "days", name: "活跃" },
+  { id: "streak", name: "连击" },
+];
+const boardSort = ref("total");
+const board = ref<BoardRow[]>([]);
+
+async function refreshBoard() {
+  if (!cloudToken.value) { board.value = []; return; }
+  try {
+    const res = await api("/api/leaderboard?sort=" + boardSort.value);
+    if (res.ok) board.value = res.list;
+  } catch {
+    // server offline
+  }
+}
+
+async function switchBoard(sortId: string) {
+  boardSort.value = sortId;
+  await refreshBoard();
+}
+
+onMounted(() => { refreshProfile(); refreshBoard(); });
 </script>
 
 <template>
@@ -106,10 +132,20 @@ onMounted(refreshProfile);
     </div>
 
     <div v-else class="cloud-signed">
-      <div class="cloud-me"><span class="cloud-avatar">{{ cloudName.slice(0, 1) }}</span><div><b>{{ cloudName }}</b><small>{{ profile ? `最佳 ${profile.best} 键 · ${profile.wins}胜 ${profile.losses}负 · ${profile.games}局` : "加载战绩中…" }}</small></div></div>
+      <div class="cloud-me"><span class="cloud-avatar">{{ cloudName.slice(0, 1) }}</span><div><b>{{ cloudName }}</b><small>{{ profile ? `累计 ${profile.totalKeys} 键 · 今日 ${profile.todayKeys} · 活跃 ${profile.activeDays} 天 · 连击 ${profile.streak} 天` : "加载数据中…" }}</small></div></div>
       <div class="cloud-actions">
         <button class="cloud-submit ghost" @click="refreshProfile">刷新</button>
         <button class="cloud-submit ghost danger" @click="logout">退出登录</button>
+      </div>
+      <div class="cloud-board">
+        <div class="cloud-board-head"><span>云端输入排行</span><span class="cloud-board-sorts"><button v-for="opt in boardSorts" :key="opt.id" :class="{ active: boardSort === opt.id }" @click="switchBoard(opt.id)">{{ opt.name }}</button></span></div>
+        <div v-if="board.length === 0" class="cloud-board-empty">还没有数据，正在同步本机统计…</div>
+        <div v-for="(row, index) in board" :key="row.name" class="cloud-board-row" :class="{ me: row.name === cloudName }">
+          <span class="board-rank">{{ index + 1 }}</span>
+          <span class="board-name">{{ row.name }}{{ row.name === cloudName ? "（我）" : "" }}</span>
+          <span class="board-value">{{ row.totalKeys.toLocaleString() }} 键</span>
+          <span class="board-sub">{{ boardSort === "today" ? "今日" : boardSort === "days" ? "活跃" : boardSort === "streak" ? "连击" : "累计" }} {{ boardSort === "today" ? row.todayKeys.toLocaleString() + " 键" : boardSort === "days" ? row.activeDays + " 天" : boardSort === "streak" ? row.streak + " 天" : row.totalMouse.toLocaleString() + " 鼠标" }}</span>
+        </div>
       </div>
       <p v-if="notice" class="cloud-notice">{{ notice }}</p>
     </div>
@@ -138,4 +174,18 @@ html[data-theme="starlight"] .cloud-tabs button.active, html[data-theme="latte"]
 .cloud-actions .cloud-submit { flex: 1; }
 .cloud-notice { margin: 0; color: var(--acc-amber); font-size: 10px; }
 .cloud-tip { margin: 0; color: var(--tx-faint); font-size: 8px; line-height: 1.6; }
+.cloud-board { margin-top: 10px; }
+.cloud-board-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; color: var(--tx-faint); font-size: 9px; font-weight: 800; letter-spacing: .08em; }
+.cloud-board-sorts { display: flex; gap: 4px; }
+.cloud-board-sorts button { padding: 3px 7px; border: 1px solid rgba(var(--line-rgb), .2); border-radius: 7px; color: var(--tx-faint); background: transparent; cursor: pointer; font-size: 8px; }
+.cloud-board-sorts button.active { color: #fff; border-color: rgba(var(--cyan-rgb), .55); background: rgba(var(--cyan-rgb), .14); }
+html[data-theme="starlight"] .cloud-board-sorts button.active { color: #1d1d1f; }
+.cloud-board-row { display: grid; grid-template-columns: 24px 1fr auto auto; gap: 8px; align-items: center; padding: 5px 8px; border-radius: 8px; color: var(--tx-soft); font-size: 10px; }
+.cloud-board-row.me { background: rgba(var(--cyan-rgb), .1); }
+.board-rank { color: var(--tx-faint); font-weight: 900; }
+.board-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; color: var(--tx-strong); }
+.board-value { font-variant-numeric: tabular-nums; }
+.board-sub { color: var(--tx-faint); font-size: 8px; }
+.cloud-board-empty { padding: 8px; color: var(--tx-faint); font-size: 9px; text-align: center; }
+
 </style>

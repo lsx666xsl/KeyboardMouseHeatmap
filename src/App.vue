@@ -405,6 +405,31 @@ function tweenTo(
     if (progress >= 1 && holder.id) { clearInterval(holder.id); holder.id = undefined; }
   }, 24);
 }
+// ---------- cloud daily stats sync (leaderboard data) ----------
+let cloudSyncTimer: ReturnType<typeof setInterval> | undefined;
+
+async function cloudSyncToday() {
+  const server = localStorage.getItem("kp-cloud-server");
+  const token = localStorage.getItem("kp-cloud-token");
+  if (!server || !token || demoMode.value) return;
+  const today = new Date().toISOString().slice(0, 10);
+  try {
+    const dashboard = await fetchActiveDashboard();
+    await fetch(server + "/api/stats", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        token,
+        date: today,
+        keys: dashboard.totalKeyPresses,
+        mouse: dashboard.totalMouseActions,
+      }),
+    });
+  } catch {
+    // offline or server down; try again next tick
+  }
+}
+
 let stopKeySoundListener: UnlistenFn | undefined;
 async function wireSoundFx() {
   configureSound(soundVoice.value, soundVolume.value / 100);
@@ -807,6 +832,8 @@ onMounted(async () => {
   if (!isKeyshowWindow) {
     connectToRuntime();
     wireSoundFx();
+    cloudSyncToday();
+    cloudSyncTimer = setInterval(cloudSyncToday, 30_000);
     const storedCustom = localStorage.getItem("keypulse-custom-sound");
     if (soundVoice.value === "custom" && storedCustom) {
       invoke<string>("read_custom_sound_base64", { fileName: storedCustom })
@@ -851,6 +878,7 @@ onUnmounted(() => {
   stopMiniListener?.();
   stopKeySoundListener?.();
   stopMetronome();
+  if (cloudSyncTimer) clearInterval(cloudSyncTimer);
   document.removeEventListener("click", closePopoversOnOutsideClick);
 });
 </script>
