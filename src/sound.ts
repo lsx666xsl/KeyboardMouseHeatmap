@@ -13,11 +13,26 @@
  * The main window plays one click per accepted physical key press (driven by
  * keyshow-event), so repeats and injected events never fire sounds.
  */
-export type SoundVoice = "off" | "click" | "typewriter" | "bubble" | "blub" | "bell" | "mahjong" | "arcade" | "laser";
+export type SoundVoice = "off" | "click" | "typewriter" | "bubble" | "blub" | "bell" | "mahjong" | "arcade" | "laser" | "custom";
 
 let ctx: AudioContext | null = null;
 let voice: SoundVoice = "off";
 let volume = 0.6;
+let customBuffer: AudioBuffer | null = null;
+
+/** Decode a user-supplied audio file (data URL from the custom sounds folder). */
+export async function loadCustomSound(dataUrl: string): Promise<boolean> {
+  try {
+    const ac = ensureCtx();
+    if (!ac) return false;
+    const response = await fetch(dataUrl);
+    const bytes = await response.arrayBuffer();
+    customBuffer = await ac.decodeAudioData(bytes);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 // Master trim: synthesized peaks are boosted ~1.35x vs. the original design so
 // the sounds read clearly on normal speakers without clipping the compressor.
@@ -90,6 +105,17 @@ export function playKeySound(heavy: boolean) {
   if (!ac) return;
   const now = ac.currentTime + 0.001;
   const v = volume;
+  if (voice === "custom") {
+    if (!customBuffer) return;
+    const source = ac.createBufferSource();
+    source.buffer = customBuffer;
+    source.playbackRate.value = heavy ? 0.9 : 1;
+    const gain = ac.createGain();
+    gain.gain.value = Math.min(v * 1.2, 1);
+    source.connect(gain).connect(ac.destination);
+    source.start(now);
+    return;
+  }
   if (voice === "click") {
     // blue-switch: sharp filtered noise tick + small body thump
     noiseBurst(ac, now, heavy ? 0.014 : 0.009, heavy ? 1300 : 2100, v * (heavy ? 0.9 : 0.7));
@@ -147,4 +173,20 @@ export function playKeySound(heavy: boolean) {
     tone(ac, now, heavy ? 110 : 180, heavy ? 0.09 : 0.06, v * 0.5, "triangle");
     tone(ac, now + 0.002, 2400, 0.012, v * 0.2, "sine");
   }
+}
+
+/** Metronome tick for rhythm practice (independent from key sounds). */
+export function playMetronomeTick(accent: boolean) {
+  const ac = ensureCtx();
+  if (!ac) return;
+  const now = ac.currentTime + 0.001;
+  const osc = ac.createOscillator();
+  osc.type = "square";
+  osc.frequency.value = accent ? 1320 : 880;
+  const gain = ac.createGain();
+  gain.gain.setValueAtTime(accent ? 0.32 : 0.22, now);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.06);
+  osc.connect(gain).connect(ac.destination);
+  osc.start(now);
+  osc.stop(now + 0.07);
 }

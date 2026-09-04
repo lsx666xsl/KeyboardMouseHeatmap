@@ -464,33 +464,71 @@ fn set_data_location(app: tauri::AppHandle, kind: String) -> Result<String, Stri
 
 /// Save a base64 PNG (from the footprint card canvas) under
 /// %USERPROFILE%\Pictures\KeyPulse\ so no extra plugins are required.
-/// Local PK profile persisted next to the dataLocation preference.
+/// A local player profile. PK stats live per profile; the PK leaderboard
+/// advertises the currently active one.
 #[derive(Clone, serde::Serialize, serde::Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
-pub struct PkProfile {
+pub struct PlayerProfile {
+    pub id: String,
+    pub name: String,
+    pub color: String,
     pub best: u64,
     pub wins: u64,
     pub losses: u64,
     pub games: u64,
 }
 
-/// Read the local PK profile (best score / wins / losses) from preferences.json.
-fn read_pk_profile(app: &impl tauri::Manager<tauri::Wry>) -> PkProfile {
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileState {
+    pub current: String,
+    pub list: Vec<PlayerProfile>,
+}
+
+fn load_profiles(app: &impl tauri::Manager<tauri::Wry>) -> ProfileState {
     let file = preferences_path(app);
+    let mut state = ProfileState { current: "default".into(), list: vec![] };
     if let Ok(raw) = std::fs::read_to_string(&file) {
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) {
-            if let Some(profile) = value.get("pkProfile") {
-                if let Ok(profile) = serde_json::from_value::<PkProfile>(profile.clone()) {
-                    return profile;
+            if let Some(profiles) = value.get("profiles") {
+                if let Ok(parsed) = serde_json::from_value::<ProfileState>(profiles.clone()) {
+                    if !parsed.list.is_empty() {
+                        return parsed;
+                    }
                 }
+            }
+            // migrate the legacy single pkProfile into a "default" profile
+            if let Some(old) = value.get("pkProfile") {
+                state = ProfileState {
+                    current: "default".into(),
+                    list: vec![PlayerProfile {
+                        id: "default".into(),
+                        name: "玩家".into(),
+                        color: "#34d9ff".into(),
+                        best: old.get("best").and_then(|v| v.as_u64()).unwrap_or(0),
+                        wins: old.get("wins").and_then(|v| v.as_u64()).unwrap_or(0),
+                        losses: old.get("losses").and_then(|v| v.as_u64()).unwrap_or(0),
+                        games: old.get("games").and_then(|v| v.as_u64()).unwrap_or(0),
+                    }],
+                };
             }
         }
     }
-    PkProfile::default()
+    if state.list.is_empty() {
+        state = ProfileState {
+            current: "default".into(),
+            list: vec![PlayerProfile {
+                id: "default".into(),
+                name: "玩家".into(),
+                color: "#34d9ff".into(),
+                ..PlayerProfile::default()
+            }],
+        };
+    }
+    state
 }
 
-/// Persist the PK profile next to the data-location preference.
-fn write_pk_profile(app: &impl tauri::Manager<tauri::Wry>, profile: &PkProfile) -> Result<(), String> {
+fn save_profiles(app: &impl tauri::Manager<tauri::Wry>, state: &ProfileState) -> Result<(), String> {
     let file = preferences_path(app);
     if let Some(parent) = file.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -500,33 +538,194 @@ fn write_pk_profile(app: &impl tauri::Manager<tauri::Wry>, profile: &PkProfile) 
     } else {
         serde_json::json!({})
     };
-    value["pkProfile"] = serde_json::to_value(profile).map_err(|e| e.to_string())?;
+    if let Some(obj) = value.as_object_mut() {
+        obj.remove("pkProfile");
+    }
+    value["profiles"] = serde_json::to_value(state).map_err(|e| e.to_string())?;
     std::fs::write(&file, serde_json::to_string_pretty(&value).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-fn get_pk_profile(app: tauri::AppHandle) -> PkProfile {
-    read_pk_profile(&app)
+fn current_profile(state: &ProfileState) -> PlayerProfile {
+    state
+        .list
+        .iter()
+        .find(|profile| profile.id == state.current)
+        .cloned()
+        .unwrap_or_else(|| {
+            state.list.first().cloned().unwrap_or_else(|| PlayerProfile {
+                id: "default".into(),
+                name: "玩家".into(),
+                color: "#34d9ff".into(),
+                ..PlayerProfile::default()
+            })
+        })
 }
 
-/// Called once by each side when a duel ends; updates the local leaderboard
-/// profile and returns it so the UI can refresh immediately.
+fn random_profile_id() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
+    format!("p{}", stamp % 100_000_000)
+}
+
+/// Frontend view: full state plus the active profile for convenience.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProfilesView {
+    current: String,
+    list: Vec<PlayerProfile>,
+    active: PlayerProfile,
+}
+
+/// Custom key sounds live in %USERPROFILE%\KeyPulseSounds (*.mp3/*.wav/*.ogg).
+const CUSTOM_SOUNDS_DIR: &str = "KeyPulseSounds";
+
 #[tauri::command]
-fn pk_record_result(app: tauri::AppHandle, win: bool, score: u64) -> Result<PkProfile, String> {
-    let mut profile = read_pk_profile(&app);
+fn custom_sounds_dir() -> String {
+    std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .unwrap_or_else(|_| ".".into())
+        + "\\KeyPulseSounds"
+}
+
+#[tauri::command]
+fn list_custom_sounds() -> Vec<String> {
+    let dir = custom_sounds_dir();
+    let Ok(entries) = std::fs::read_dir(&dir) else { return vec![] };
+    let mut names = vec![];
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        let lower = name.to_lowercase();
+        if lower.ends_with(".mp3") || lower.ends_with(".wav") || lower.ends_with(".ogg") {
+            names.push(name);
+        }
+    }
+    names.sort();
+    names
+}
+
+#[tauri::command]
+fn read_custom_sound_base64(file_name: String) -> Result<String, String> {
+    use base64::{engine::general_purpose, Engine as _};
+    let dir = custom_sounds_dir();
+    let path = std::path::Path::new(&dir).join(&file_name);
+    let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+    if meta.len() > 3 * 1024 * 1024 {
+        return Err("音频超过 3MB，请换小一点的文件".into());
+    }
+    let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+    let ext = file_name
+        .rsplit('.')
+        .next()
+        .unwrap_or("mp3")
+        .to_lowercase();
+    let mime = match ext.as_str() {
+        "wav" => "audio/wav",
+        "ogg" => "audio/ogg",
+        _ => "audio/mpeg",
+    };
+    Ok(format!(
+        "data:{};base64,{}",
+        mime,
+        general_purpose::STANDARD.encode(&bytes)
+    ))
+}
+
+#[tauri::command]
+fn get_pk_profile(app: tauri::AppHandle) -> PlayerProfile {
+    let state = load_profiles(&app);
+    current_profile(&state)
+}
+
+#[tauri::command]
+fn profiles_get(app: tauri::AppHandle) -> ProfilesView {
+    let state = load_profiles(&app);
+    ProfilesView { active: current_profile(&state), current: state.current, list: state.list }
+}
+
+#[tauri::command]
+fn profile_create(app: tauri::AppHandle, name: String) -> Result<ProfilesView, String> {
+    let mut state = load_profiles(&app);
+    let cleaned = name.trim();
+    let final_name = if cleaned.is_empty() { "玩家".into() } else { cleaned.to_string() };
+    let id = random_profile_id();
+    state.list.push(PlayerProfile {
+        id: id.clone(),
+        name: final_name,
+        color: "#34d9ff".into(),
+        ..PlayerProfile::default()
+    });
+    state.current = id;
+    save_profiles(&app, &state)?;
+    Ok(ProfilesView { active: current_profile(&state), current: state.current, list: state.list })
+}
+
+#[tauri::command]
+fn profile_switch(app: tauri::AppHandle, id: String) -> Result<ProfilesView, String> {
+    let mut state = load_profiles(&app);
+    if !state.list.iter().any(|profile| profile.id == id) {
+        return Err("档案不存在".into());
+    }
+    state.current = id;
+    save_profiles(&app, &state)?;
+    Ok(ProfilesView { active: current_profile(&state), current: state.current, list: state.list })
+}
+
+#[tauri::command]
+fn profile_rename(app: tauri::AppHandle, id: String, name: String) -> Result<ProfilesView, String> {
+    let mut state = load_profiles(&app);
+    let cleaned = name.trim();
+    if cleaned.is_empty() {
+        return Err("名字不能为空".into());
+    }
+    if let Some(profile) = state.list.iter_mut().find(|profile| profile.id == id) {
+        profile.name = cleaned.to_string();
+    }
+    save_profiles(&app, &state)?;
+    Ok(ProfilesView { active: current_profile(&state), current: state.current, list: state.list })
+}
+
+#[tauri::command]
+fn profile_delete(app: tauri::AppHandle, id: String) -> Result<ProfilesView, String> {
+    let mut state = load_profiles(&app);
+    if state.list.len() <= 1 {
+        return Err("至少保留一个档案".into());
+    }
+    if state.current == id {
+        return Err("请先切换到其他档案再删除".into());
+    }
+    state.list.retain(|profile| profile.id != id);
+    save_profiles(&app, &state)?;
+    Ok(ProfilesView { active: current_profile(&state), current: state.current, list: state.list })
+}
+
+#[tauri::command]
+fn profile_set_color(app: tauri::AppHandle, id: String, color: String) -> Result<ProfilesView, String> {
+    let mut state = load_profiles(&app);
+    if let Some(profile) = state.list.iter_mut().find(|profile| profile.id == id) {
+        profile.color = color;
+    }
+    save_profiles(&app, &state)?;
+    Ok(ProfilesView { active: current_profile(&state), current: state.current, list: state.list })
+}
+
+/// Record a PK result onto the active profile.
+#[tauri::command]
+fn pk_record_result(app: tauri::AppHandle, win: bool, score: u64) -> Result<PlayerProfile, String> {
+    let mut state = load_profiles(&app);
+    let mut profile = current_profile(&state);
     profile.games += 1;
-    if win {
-        profile.wins += 1;
-    } else {
-        profile.losses += 1;
+    if win { profile.wins += 1 } else { profile.losses += 1 }
+    if score > profile.best { profile.best = score; }
+    if let Some(slot) = state.list.iter_mut().find(|slot| slot.id == profile.id) {
+        *slot = profile.clone();
     }
-    if score > profile.best {
-        profile.best = score;
-    }
-    write_pk_profile(&app, &profile)?;
+    save_profiles(&app, &state)?;
     Ok(profile)
 }
+
+/// Save a base64 PNG (from the footprint card canvas) under
+/// %USERPROFILE%\Pictures\KeyPulse\ so no extra plugins are required.
 
 #[tauri::command]
 fn save_footprint_png(app: tauri::AppHandle, data_url: String, file_name: String) -> Result<String, String> {
@@ -852,6 +1051,15 @@ pub fn run() {
             save_footprint_png,
             get_pk_profile,
             pk_record_result,
+            custom_sounds_dir,
+            list_custom_sounds,
+            read_custom_sound_base64,
+            profiles_get,
+            profile_create,
+            profile_switch,
+            profile_rename,
+            profile_delete,
+            profile_set_color,
             get_app_behavior,
             set_app_behavior,
             set_autostart,

@@ -6,7 +6,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import KeyshowStage from "./KeyshowStage.vue";
 import MiniStat from "./MiniStat.vue";
-import { configureSound, playKeySound, type SoundVoice } from "./sound";
+import { configureSound, loadCustomSound, playKeySound, playMetronomeTick, type SoundVoice } from "./sound";
 import DailyCard from "./DailyCard.vue";
 import PkDuel from "./PkDuel.vue";
 
@@ -163,6 +163,72 @@ const toastMsg = ref("");
 const footprintAuto = ref(localStorage.getItem("keypulse-footprint-auto") !== "0");
 const showFootprintCard = ref(false);
 const showPkDuel = ref(false);
+type PlayerProfile = {
+  id: string; name: string; color: string; best: number; wins: number; losses: number; games: number;
+};
+const profiles = ref<PlayerProfile[]>([]);
+const activeProfile = ref<PlayerProfile | null>(null);
+const profileColors = ["#34d9ff", "#ff5c7a", "#2de2a6", "#ffd166", "#a78bfa", "#ff9f0a", "#ff2e88", "#7ba889"];
+const newProfileName = ref("");
+
+function applyProfiles(view: { current: string; list: PlayerProfile[]; active: PlayerProfile }) {
+  profiles.value = view.list;
+  activeProfile.value = view.active;
+}
+
+async function refreshProfiles() {
+  try {
+    applyProfiles(await invoke("profiles_get"));
+  } catch {
+    // older runtime
+  }
+}
+
+async function createProfile() {
+  try {
+    applyProfiles(await invoke("profile_create", { name: newProfileName.value }));
+    newProfileName.value = "";
+  } catch (error) {
+    console.info(String(error));
+  }
+}
+
+async function switchProfile(id: string) {
+  try {
+    applyProfiles(await invoke("profile_switch", { id }));
+  } catch (error) {
+    console.info(String(error));
+  }
+}
+
+function promptRename(profile: PlayerProfile) {
+  const next = window.prompt("给档案一个新名字", profile.name);
+  if (next && next.trim()) renameProfile(profile.id, next.trim());
+}
+
+async function renameProfile(id: string, name: string) {
+  try {
+    applyProfiles(await invoke("profile_rename", { id, name }));
+  } catch (error) {
+    console.info(String(error));
+  }
+}
+
+async function deleteProfile(id: string) {
+  try {
+    applyProfiles(await invoke("profile_delete", { id }));
+  } catch (error) {
+    console.info(String(error));
+  }
+}
+
+async function setProfileColor(id: string, color: string) {
+  try {
+    applyProfiles(await invoke("profile_set_color", { id, color }));
+  } catch (error) {
+    console.info(String(error));
+  }
+}
 const footprintSnapshot = ref<DashboardData | null>(null);
 
 function toggleFootprintAuto(on: boolean) {
@@ -218,6 +284,77 @@ function setSoundVolume(percent: number) {
 function toggleAchievements(on: boolean) {
   achievementsOn.value = on;
   localStorage.setItem("keypulse-achievements", on ? "1" : "0");
+}
+
+// ---------- custom key sound ----------
+const customSounds = ref<string[]>([]);
+const customSoundName = ref("");
+const customSoundDir = ref("");
+
+async function refreshCustomSounds() {
+  try {
+    customSoundDir.value = await invoke<string>("custom_sounds_dir");
+    customSounds.value = await invoke<string[]>("list_custom_sounds");
+  } catch {
+    // older runtime
+  }
+}
+
+async function applyCustomSound(fileName: string) {
+  if (!fileName) return;
+  try {
+    const dataUrl = await invoke<string>("read_custom_sound_base64", { fileName });
+    const loaded = await loadCustomSound(dataUrl);
+    if (loaded) {
+      setSoundVoice("custom");
+      customSoundName.value = fileName;
+      localStorage.setItem("keypulse-sound", "custom");
+      localStorage.setItem("keypulse-custom-sound", fileName);
+      playKeySound(true);
+    } else {
+      console.info("Could not decode audio file.");
+    }
+  } catch (error) {
+    console.info(String(error));
+  }
+}
+
+// ---------- metronome rhythm trainer ----------
+const metronomeOn = ref(localStorage.getItem("keypulse-metronome") === "1");
+const bpm = ref(Number(localStorage.getItem("keypulse-bpm")) || 90);
+const beatCount = ref(0);
+let metronomeTimer: ReturnType<typeof setInterval> | undefined;
+
+function stopMetronome() {
+  if (metronomeTimer) clearInterval(metronomeTimer);
+  metronomeTimer = undefined;
+  metronomeOn.value = false;
+  localStorage.setItem("keypulse-metronome", "0");
+}
+
+function startMetronome() {
+  metronomeOn.value = true;
+  localStorage.setItem("keypulse-metronome", "1");
+  if (metronomeTimer) clearInterval(metronomeTimer);
+  beatCount.value = 0;
+  const intervalMs = Math.max(200, Math.round(60000 / bpm.value));
+  const tick = () => {
+    beatCount.value += 1;
+    playMetronomeTick(beatCount.value % 4 === 1);
+  };
+  tick();
+  metronomeTimer = setInterval(tick, intervalMs);
+}
+
+function changeBpm(next: number) {
+  bpm.value = Math.min(Math.max(next, 40), 220);
+  localStorage.setItem("keypulse-bpm", String(bpm.value));
+  if (metronomeOn.value) startMetronome();
+}
+
+function toggleMetronome(on: boolean) {
+  if (on) startMetronome();
+  else stopMetronome();
 }
 
 const KEY_MILESTONES: Array<[number, string]> = [
@@ -375,6 +512,8 @@ function openSettings() {
   keyshowDrag.value = localStorage.getItem("keypulse-keyshow-drag") === "1";
   refreshDataInfo();
   refreshBehavior();
+  refreshProfiles();
+  refreshCustomSounds();
   showSettingsPanel.value = true;
 }
 
@@ -667,6 +806,12 @@ onMounted(async () => {
   if (!isKeyshowWindow) {
     connectToRuntime();
     wireSoundFx();
+    const storedCustom = localStorage.getItem("keypulse-custom-sound");
+    if (soundVoice.value === "custom" && storedCustom) {
+      invoke<string>("read_custom_sound_base64", { fileName: storedCustom })
+        .then((dataUrl) => loadCustomSound(dataUrl))
+        .catch(() => undefined);
+    }
     setTimeout(autoShowFootprintIfNew, 2600);
     refreshKeyshowState();
     refreshMiniState();
@@ -704,6 +849,7 @@ onUnmounted(() => {
   stopKeyshowChangedListener?.();
   stopMiniListener?.();
   stopKeySoundListener?.();
+  stopMetronome();
   document.removeEventListener("click", closePopoversOnOutsideClick);
 });
 </script>
@@ -762,6 +908,28 @@ onUnmounted(() => {
               </div>
               <div class="ks-section-title">迷你统计窗</div>
               <button class="keyshow-master" :class="{ on: miniEnabled }" @click="toggleMini"><span class="ks-master-text"><b>{{ miniEnabled ? "迷你窗已显示" : "迷你窗已隐藏" }}</b><small>{{ miniEnabled ? "右上角小卡片实时显示今日总量与冠军键" : "开启后在桌面右上角显示实时统计小卡片" }}</small></span><span class="ks-switch"><i></i></span></button>
+              <div class="ks-section-title">我的档案</div>
+              <div v-if="activeProfile" class="profile-current">
+                <i class="profile-avatar" :style="{ background: activeProfile.color }"></i>
+                <span class="profile-meta"><b>{{ activeProfile.name }}</b><small>最佳 {{ activeProfile.best }} 键 · 胜 {{ activeProfile.wins }} 负 {{ activeProfile.losses }} · {{ activeProfile.games }} 局</small></span>
+                <button class="ks-radio small" @click="promptRename(activeProfile)">改名</button>
+              </div>
+              <div class="profile-colors" role="radiogroup" aria-label="档案颜色">
+                <button v-for="color in profileColors" :key="color" class="profile-color" :class="{ active: activeProfile?.color === color }" :style="{ background: color }" :aria-checked="activeProfile?.color === color" role="radio" @click="setProfileColor(activeProfile?.id ?? '', color)"></button>
+              </div>
+              <div class="profile-list">
+                <div v-for="profile in profiles" :key="profile.id" class="profile-row" :class="{ active: profile.id === activeProfile?.id }">
+                  <i class="profile-avatar" :style="{ background: profile.color }"></i>
+                  <span class="profile-meta"><b>{{ profile.name }}</b><small>最佳 {{ profile.best }} · {{ profile.wins }}胜 / {{ profile.losses }}负</small></span>
+                  <button v-if="profile.id !== activeProfile?.id" class="profile-action" @click="switchProfile(profile.id)">切换</button>
+                  <button v-if="profile.id !== activeProfile?.id" class="profile-action danger" @click="deleteProfile(profile.id)">删除</button>
+                  <span v-else class="profile-action current-tag">当前</span>
+                </div>
+              </div>
+              <div class="profile-create">
+                <input v-model="newProfileName" maxlength="16" placeholder="新档案昵称…" @keydown.enter="createProfile" />
+                <button class="profile-action add" @click="createProfile">＋ 新建档案</button>
+              </div>
               <div class="ks-section-title">启动与关闭</div>
               <div class="ks-behavior-row">
                 <button class="ks-drag-toggle" :class="{ on: autostartOn }" @click="toggleAutostart(!autostartOn)"><span class="ks-master-text"><b>{{ autostartOn ? "开机自启动已开" : "开机自启动已关" }}</b><small>{{ autostartOn ? "登录 Windows 后自动在后台运行" : "开机时不会自动启动" }}</small></span><span class="ks-switch"><i></i></span></button>
@@ -805,6 +973,22 @@ onUnmounted(() => {
                 </div>
                 <div class="ks-layout-col"><div class="ks-layout-title"> </div>
                   <button class="ks-size" style="width:100%; padding:11px 0;" @click="openFootprintCard">✦ 立即查看今日足迹</button>
+                </div>
+              </div>
+              <div class="ks-layout-row">
+                <div class="ks-layout-col"><div class="ks-layout-title">自定义音效</div>
+                  <div class="ks-sound-row">
+                    <select class="ks-select" :value="customSoundName" @change="applyCustomSound(($event.target as HTMLSelectElement).value)">
+                      <option value="">选择音频文件…</option>
+                      <option v-for="file in customSounds" :key="file" :value="file">{{ file }}</option>
+                    </select>
+                    <button class="ks-size" style="width:100%; padding:6px 0;" @click="refreshCustomSounds">↻ 刷新文件列表</button>
+                    <small class="ks-custom-hint">把 .mp3/.wav 放进：{{ customSoundDir || "加载中…" }}</small>
+                  </div>
+                </div>
+                <div class="ks-layout-col"><div class="ks-layout-title">节奏节拍器</div>
+                  <button class="ks-drag-toggle" :class="{ on: metronomeOn }" @click="toggleMetronome(!metronomeOn)"><span class="ks-master-text"><b>{{ metronomeOn ? "节拍器运行中 · 第 " + beatCount + " 拍" : "节拍器已停" }}</b><small>{{ metronomeOn ? "按 BPM 打点，重拍提示" : "开启后每拍滴答提示节奏" }}</small></span><span class="ks-switch"><i></i></span></button>
+                  <label class="ks-range compact"><input type="range" min="40" max="220" step="2" :value="bpm" @input="changeBpm(Number(($event.target as HTMLInputElement).value))" /><span>{{ bpm }} BPM</span></label>
                 </div>
               </div>
 <p class="ks-note">⌨ 显示的是按下动作，不记录文本 · 托盘菜单或顶栏 ⌨ 按钮可随时开/关 · 拖动后选择任意预设位置可恢复对齐</p>
@@ -888,6 +1072,7 @@ onUnmounted(() => {
     <section class="panel timeline-panel"><div class="panel-heading compact"><div><p class="eyebrow">ACTIVITY PULSE · {{ activeRangeLabel }}</p><h3>一天中的活跃节奏</h3></div><span class="timeline-note">峰值时段 <b>{{ String(peakHour).padStart(2, "0") }}:00</b></span></div><div class="timeline-chart"><div class="chart-grid-lines"><i></i><i></i><i></i><i></i></div><div v-for="(value, hour) in hourlyActivity" :key="hour" class="chart-column"><div class="chart-bar" :style="{ height: `${value * 0.84}%` }"><span>{{ value }}</span></div><small v-if="hour % 3 === 0">{{ String(hour).padStart(2, "0") }}:00</small></div></div></section>
     <PkDuel v-if="showPkDuel" @close="showPkDuel = false" />
     <DailyCard v-if="showFootprintCard && footprintSnapshot" :snapshot="footprintSnapshot" @close="markFootprintSeen" />
+    <Transition name="beat-pop"><i v-if="metronomeOn" :key="beatCount" class="beat-dot"></i></Transition>
     <Transition name="toast-pop"><div v-if="toastMsg" class="achievement-toast" role="status"><span>🏆</span><div><b>成就达成</b><small>{{ toastMsg }}</small></div></div></Transition>
     <footer class="footer-note"><span>KeyPulse · offline by design</span><span>隐私优先 · 只保存聚合统计，不保存输入文本</span><button class="clear-button" :disabled="demoMode" @click="clearStats">清空本地数据</button><button class="footprint-button" @click="openFootprintCard">✦ 足迹卡</button><button class="footprint-button pk-launch" @click="showPkDuel = true">⚔ PK 对战</button></footer>
   </main>
@@ -1189,6 +1374,26 @@ html.keyshow-window, html.keyshow-window body { background: transparent !importa
 .ks-drag-toggle .ks-master-text small { font-size: 8px; }
 .ks-data { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .ks-behavior-row { margin-bottom: 8px; }
+.profile-current { display: flex; align-items: center; gap: 10px; padding: 10px 11px; border: 1px solid rgba(var(--line-rgb), .2); border-radius: 12px; background: rgba(var(--ink-rgb), .3); }
+.profile-avatar { flex: 0 0 auto; width: 26px; height: 26px; border-radius: 50%; box-shadow: inset 0 0 0 2px rgba(255,255,255,.25); }
+.profile-meta { flex: 1; min-width: 0; }
+.profile-meta b, .profile-meta small { display: block; }
+.profile-meta b { color: var(--tx-strong); font-size: 12px; }
+.profile-meta small { margin-top: 2px; color: var(--tx-faint); font-size: 9px; }
+.profile-colors { display: flex; gap: 6px; margin: 8px 0 2px; }
+.profile-color { width: 18px; height: 18px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
+.profile-color.active { border-color: var(--text-main); box-shadow: 0 0 0 2px rgba(var(--line-rgb), .4); }
+.profile-list { display: grid; gap: 5px; margin-top: 6px; }
+.profile-row { display: flex; align-items: center; gap: 8px; padding: 6px 9px; border: 1px solid rgba(var(--line-rgb), .14); border-radius: 10px; }
+.profile-row.active { border-color: rgba(var(--cyan-rgb), .5); background: rgba(var(--cyan-rgb), .07); }
+.profile-action { padding: 4px 9px; border: 1px solid rgba(var(--line-rgb), .2); border-radius: 8px; color: var(--tx-soft); background: transparent; cursor: pointer; font-size: 9px; }
+.profile-action:hover { border-color: rgba(var(--cyan-rgb), .6); color: var(--text-main); }
+.profile-action.danger:hover { border-color: rgba(var(--pink-rgb), .6); color: var(--acc-pink-soft); }
+.profile-action.current-tag { border: none; color: var(--tx-faint); cursor: default; }
+.profile-action.add { color: var(--acc-cyan-bright); border-color: rgba(var(--cyan-rgb), .4); }
+.profile-create { display: flex; gap: 6px; margin-top: 8px; }
+.profile-create input { flex: 1; min-width: 0; padding: 7px 9px; border: 1px solid rgba(var(--line-rgb), .22); border-radius: 9px; color: var(--tx-strong); background: rgba(var(--ink-rgb), .3); font-size: 11px; }
+
 .ks-radio-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .ks-radio-label { flex: 0 0 52px; color: var(--tx-faint); font-size: 10px; font-weight: 700; }
 .ks-radios { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; flex: 1; }
@@ -1206,6 +1411,12 @@ html[data-theme="starlight"] .ks-radio.active, html[data-theme="latte"] .ks-radi
 .ks-data-path { margin: 10px 0 0; color: var(--tx-faint); font-size: 9px; }
 .ks-data-path code { display: inline-block; max-width: 100%; overflow-wrap: anywhere; color: var(--tx-soft); font-family: ui-monospace, Consolas, monospace; font-size: 9px; }
 .ks-data-notice { margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; color: var(--acc-amber); background: rgba(var(--amber-rgb), .08); font-size: 9px; line-height: 1.5; }
+.ks-custom-hint { display: block; margin-top: 4px; color: var(--tx-faint); font-size: 8px; line-height: 1.5; overflow-wrap: anywhere; }
+.beat-dot { position: fixed; z-index: 45; right: 18px; bottom: 16px; width: 10px; height: 10px; border-radius: 50%; background: var(--acc-pink); box-shadow: 0 0 12px var(--acc-pink); }
+.beat-pop-enter-active { animation: beat-pulse .24s ease; }
+.beat-pop-leave-active { display: none; }
+@keyframes beat-pulse { 0% { transform: scale(.4); opacity: 1; } 100% { transform: scale(1.6); opacity: .2; } }
+
 .ks-sound-row { display: flex; flex-direction: column; gap: 6px; }
 .ks-select { width: 100%; padding: 7px 9px; border: 1px solid rgba(var(--line-rgb), .25); border-radius: 9px; color: var(--tx-strong); background: rgba(var(--ink-rgb), .35); font-size: 11px; cursor: pointer; }
 .ks-range.compact { padding: 5px 8px; }

@@ -32,11 +32,28 @@ async function refreshPeers() {
   }
 }
 
+type ProfileLike = { id: string; name: string; color: string; best: number; wins: number; losses: number; games: number };
+
+async function currentProfile(): Promise<ProfileLike | null> {
+  try {
+    return await invoke<ProfileLike>("get_pk_profile");
+  } catch {
+    return null;
+  }
+}
+
 async function startHosting() {
   if (!playerName.value.trim()) playerName.value = "玩家" + Math.floor(Math.random() * 900 + 100);
   localStorage.setItem("keypulse-pk-name", playerName.value);
   try {
-    await invoke("pk_start", { name: playerName.value });
+    const profile = await currentProfile();
+    await invoke("pk_start", {
+      name: profile?.name || playerName.value,
+      best: profile?.best || 0,
+      wins: profile?.wins || 0,
+      losses: profile?.losses || 0,
+      games: profile?.games || 0,
+    });
     phase.value = "hosting";
     message.value = "等待对手挑战…（保持打开，同网段其他 KeyPulse 会看到你）";
   } catch (error) {
@@ -92,8 +109,18 @@ async function quitToLobby() {
   refreshPeers();
 }
 
+const myRecord = ref("—");
+async function refreshMyRecord() {
+  const profile = await currentProfile();
+  if (profile) {
+    playerName.value = profile.name || playerName.value;
+    myRecord.value = `最佳 ${profile.best} · ${profile.wins}胜 ${profile.losses}负`;
+  }
+}
+
 onMounted(async () => {
   refreshPeers();
+  refreshMyRecord();
   try {
     stopPk = await listen<any>("pk-event", (event) => {
       const payload = event.payload as Record<string, unknown>;
@@ -152,6 +179,7 @@ const isWinner = () => myScore.value > peerScore.value;
       <div v-if="phase === 'idle'" class="pk-body">
         <p class="pk-intro">和同网段开启 KeyPulse 的朋友比 60 秒谁按得更多——谁键盘敲得快一目了然。</p>
         <label class="pk-name">你的昵称 <input v-model="playerName" maxlength="16" placeholder="输入昵称" /></label>
+        <p v-if="myRecord !== '—'" class="pk-record">当前档案战绩：{{ myRecord }}</p>
         <div class="pk-actions">
           <button class="pk-primary" @click="startHosting">🛡 开启对战等待挑战</button>
           <button class="pk-ghost" @click="refreshPeers">↻ 刷新对手</button>
@@ -195,6 +223,7 @@ const isWinner = () => myScore.value > peerScore.value;
 .pk-modal h3 { margin: 4px 0 0; font-size: 20px; letter-spacing: -.04em; }
 .pk-close { width: 30px; height: 30px; border: 1px solid rgba(var(--line-rgb), .25); border-radius: 50%; color: var(--tx-soft); background: rgba(var(--line-rgb), .1); cursor: pointer; font-size: 19px; line-height: 1; }
 .pk-intro { margin: 0 0 14px; color: var(--tx-soft); font-size: 12px; line-height: 1.7; }
+.pk-record { margin: 0 0 8px; padding: 6px 10px; border-left: 3px solid var(--acc-cyan); border-radius: 6px; color: var(--tx-soft); background: rgba(var(--cyan-rgb), .07); font-size: 10px; }
 .pk-name { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; color: var(--tx-faint); font-size: 10px; }
 .pk-name input { padding: 9px 11px; border: 1px solid rgba(var(--line-rgb), .28); border-radius: 10px; color: var(--tx-strong); background: rgba(var(--ink-rgb), .35); font-size: 13px; }
 .pk-actions { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
