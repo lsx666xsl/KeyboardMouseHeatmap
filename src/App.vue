@@ -237,19 +237,27 @@ function checkAchievements(total: number) {
 
 const shownKeys = ref(0);
 const shownMouse = ref(0);
-let countTimer: ReturnType<typeof setInterval> | undefined;
-function tweenTo(target: number, setter: (v: number) => void, current: () => number) {
-  if (countTimer) clearInterval(countTimer);
+// One interval per headline number: sharing a single timer let the second
+// card's tween cancel the first one's (total key count stayed at 0 forever).
+const keysTimer: { id?: ReturnType<typeof setInterval> } = {};
+const mouseTimer: { id?: ReturnType<typeof setInterval> } = {};
+function tweenTo(
+  target: number,
+  setter: (v: number) => void,
+  current: () => number,
+  holder: { id?: ReturnType<typeof setInterval> },
+) {
+  if (holder.id) clearInterval(holder.id);
   const from = current();
   const diff = target - from;
   if (Math.abs(diff) < 2) { setter(target); return; }
   const started = Date.now();
   const duration = 360;
-  countTimer = setInterval(() => {
+  holder.id = setInterval(() => {
     const progress = Math.min((Date.now() - started) / duration, 1);
     const eased = 1 - Math.pow(1 - progress, 3);
     setter(Math.round(from + diff * eased));
-    if (progress >= 1 && countTimer) { clearInterval(countTimer); countTimer = undefined; }
+    if (progress >= 1 && holder.id) { clearInterval(holder.id); holder.id = undefined; }
   }, 24);
 }
 let stopKeySoundListener: UnlistenFn | undefined;
@@ -476,11 +484,11 @@ const totalMouseActions = computed(() =>
 const topKeys = computed(() => [...allKeys.value].sort((a, b) => b.count - a.count).slice(0, 4));
 const champion = computed(() => topKeys.value.find((key) => key.count > 0) ?? null);
 watch(totalKeyPresses, (value) => {
-  tweenTo(value, (n) => { shownKeys.value = n; }, () => shownKeys.value);
+  tweenTo(value, (n) => { shownKeys.value = n; }, () => shownKeys.value, keysTimer);
   checkAchievements(value);
 });
 watch(totalMouseActions, (value) => {
-  tweenTo(value, (n) => { shownMouse.value = n; }, () => shownMouse.value);
+  tweenTo(value, (n) => { shownMouse.value = n; }, () => shownMouse.value, mouseTimer);
 });
 const maxKeyCount = computed(() => Math.max(1, ...allKeys.value.map((key) => key.count)));
 const hourlyActivity = computed(() => {
