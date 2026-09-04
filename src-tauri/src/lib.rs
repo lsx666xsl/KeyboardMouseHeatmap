@@ -58,6 +58,7 @@ fn toggle_keyshow(app: tauri::AppHandle) -> Result<bool, String> {
 
 #[tauri::command]
 fn set_keyshow_position(app: tauri::AppHandle, position: String) -> Result<(), String> {
+    if app.try_state::<KeyshowPrefs>().is_none() { return Ok(()); }
     if !KEYSHOW_POSITIONS.contains(&position.as_str()) {
         return Err(format!("unsupported keyshow position: {position}"));
     }
@@ -71,6 +72,7 @@ fn set_keyshow_position(app: tauri::AppHandle, position: String) -> Result<(), S
 
 #[tauri::command]
 fn set_keyshow_size(app: tauri::AppHandle, size: String) -> Result<(), String> {
+    if app.try_state::<KeyshowPrefs>().is_none() { return Ok(()); }
     if !KEYSHOW_SIZES.iter().any(|(id, _, _)| *id == size) {
         return Err(format!("unsupported keyshow size: {size}"));
     }
@@ -80,6 +82,87 @@ fn set_keyshow_size(app: tauri::AppHandle, size: String) -> Result<(), String> {
         .lock()
         .map_err(|_| "keyshow prefs poisoned".to_string())? = size;
     apply_keyshow_layout(&app)
+}
+
+fn apply_window_opacity(window: &tauri::WebviewWindow, opacity: f64) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            SetLayeredWindowAttributes, LWA_ALPHA,
+        };
+        let hwnd = window.hwnd().map_err(|e| e.to_string())?;
+        let alpha = (opacity.clamp(0.15, 1.0) * 255.0).round() as u8;
+        unsafe {
+            SetLayeredWindowAttributes(hwnd, windows::Win32::Foundation::COLORREF(0), alpha, LWA_ALPHA)
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn set_keyshow_opacity(app: tauri::AppHandle, opacity: f64) -> Result<(), String> {
+    if app.try_state::<KeyshowPrefs>().is_none() { return Ok(()); }
+    let window = app
+        .get_webview_window("keys-overlay")
+        .ok_or_else(|| "keyshow overlay window unavailable".to_string())?;
+    let clamped = opacity.clamp(0.15, 1.0);
+    *app.state::<KeyshowPrefs>()
+        .opacity
+        .lock()
+        .map_err(|_| "keyshow prefs poisoned".to_string())? = clamped;
+    apply_window_opacity(&window, clamped)
+}
+
+#[tauri::command]
+fn set_keyshow_custom_position(app: tauri::AppHandle, x: i32, y: i32) -> Result<(), String> {
+    if app.try_state::<KeyshowPrefs>().is_none() { return Ok(()); }
+    let window = app
+        .get_webview_window("keys-overlay")
+        .ok_or_else(|| "keyshow overlay window unavailable".to_string())?;
+    let prefs = app.state::<KeyshowPrefs>();
+    let mut position = prefs
+        .position
+        .lock()
+        .map_err(|_| "keyshow prefs poisoned".to_string())?;
+    if *position != "custom" {
+        *position = "custom".into();
+    }
+    *prefs
+        .custom_position
+        .lock()
+        .map_err(|_| "keyshow prefs poisoned".to_string())? = Some((x, y));
+    drop(position);
+    window
+        .set_position(Position::Physical(PhysicalPosition::new(x, y)))
+        .map_err(|e| e.to_string())
+}
+
+/// Drag mode makes the overlay interactive (draggable by its handle) and turns
+/// click-through off; locking it restores click-through.
+#[tauri::command]
+fn set_keyshow_drag_mode(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    if app.try_state::<KeyshowPrefs>().is_none() { return Ok(()); }
+    let window = app
+        .get_webview_window("keys-overlay")
+        .ok_or_else(|| "keyshow overlay window unavailable".to_string())?;
+    *app.state::<KeyshowPrefs>()
+        .drag_mode
+        .lock()
+        .map_err(|_| "keyshow prefs poisoned".to_string())? = enabled;
+    window
+        .set_ignore_cursor_events(!enabled)
+        .map_err(|e| e.to_string())?;
+    // Toggling click-through re-applies the window ex-style, which drops the
+    // layered alpha set by SetLayeredWindowAttributes; replay the saved opacity.
+    let opacity = *app
+        .state::<KeyshowPrefs>()
+        .opacity
+        .lock()
+        .map_err(|_| "keyshow prefs poisoned".to_string())?;
+    apply_window_opacity(&window, opacity)?;
+    let _ = app.emit("keyshow-dragmode", enabled);
+    Ok(())
 }
 
 /// Built-in placements and sizes for the keyshow overlay window.
@@ -100,6 +183,9 @@ const KEYSHOW_SIZES: [(&str, f64, f64); 3] = [
 pub struct KeyshowPrefs {
     position: Mutex<String>,
     size: Mutex<String>,
+    opacity: Mutex<f64>,
+    drag_mode: Mutex<bool>,
+    custom_position: Mutex<Option<(i32, i32)>>,
 }
 
 impl Default for KeyshowPrefs {
@@ -107,6 +193,9 @@ impl Default for KeyshowPrefs {
         Self {
             position: Mutex::new("bottom-center".into()),
             size: Mutex::new("medium".into()),
+            opacity: Mutex::new(1.0),
+            drag_mode: Mutex::new(false),
+            custom_position: Mutex::new(None),
         }
     }
 }
@@ -160,12 +249,22 @@ fn apply_keyshow_layout(app: &tauri::AppHandle) -> Result<(), String> {
         .map_err(|_| "keyshow prefs poisoned".to_string())?
         .clone();
     let (logical_w, logical_h) = keyshow_geometry(&size);
+    let custom = prefs
+        .custom_position
+        .lock()
+        .map_err(|_| "keyshow prefs poisoned".to_string())?
+        .clone();
     if let Some(monitor) = window.primary_monitor().map_err(|e| e.to_string())? {
         let area = monitor.work_area();
         let scale = monitor.scale_factor();
         let width = logical_w * scale;
         let height = logical_h * scale;
-        let (x, y) = keyshow_bounds(&position, &area, scale, width, height);
+        let (x, y) = if position == "custom" && custom.is_some() {
+            let (cx, cy) = custom.unwrap();
+            (cx as f64, cy as f64)
+        } else {
+            keyshow_bounds(&position, &area, scale, width, height)
+        };
         window
             .set_size(Size::Physical(PhysicalSize::new(width as u32, height as u32)))
             .map_err(|e| e.to_string())?;
@@ -174,6 +273,49 @@ fn apply_keyshow_layout(app: &tauri::AppHandle) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+fn build_mini_overlay(app: &tauri::App) -> tauri::Result<()> {
+    let mini = WebviewWindowBuilder::new(app, "keys-mini", WebviewUrl::App("index.html".into()))
+        .title("KeyPulse Mini")
+        .inner_size(230.0, 92.0)
+        .decorations(false)
+        .transparent(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .resizable(false)
+        .shadow(false)
+        .focused(false)
+        .visible(false)
+        .build()?;
+    mini.set_ignore_cursor_events(true)?;
+    if let Some(monitor) = mini.primary_monitor()? {
+        let area = monitor.work_area();
+        let scale = monitor.scale_factor();
+        let margin = 16.0 * scale;
+        let width = 230.0 * scale;
+        let height = 92.0 * scale;
+        let x = area.position.x as f64 + area.size.width as f64 - width - margin;
+        let y = area.position.y as f64 + margin;
+        mini.set_size(Size::Physical(PhysicalSize::new(width as u32, height as u32)))?;
+        mini.set_position(Position::Physical(PhysicalPosition::new(x as i32, y as i32)))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn toggle_mini(app: tauri::AppHandle) -> Result<bool, String> {
+    let window = app
+        .get_webview_window("keys-mini")
+        .ok_or_else(|| "mini overlay window unavailable".to_string())?;
+    let visible = window.is_visible().map_err(|error| error.to_string())?;
+    if visible {
+        window.hide().map_err(|error| error.to_string())?;
+    } else {
+        window.show().map_err(|error| error.to_string())?;
+    }
+    let _ = app.emit("mini-changed", !visible);
+    Ok(!visible)
 }
 
 fn toggle_keyshow_window(app: &tauri::AppHandle) -> Result<bool, String> {
@@ -208,18 +350,124 @@ fn build_keyshow_overlay(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Where the SQLite database lives. `appdata` = %APPDATA% (default, works for
+/// installed builds); `appdir` = a writable folder next to the executable
+/// (portable setups that do not want to grow the system drive).
+fn preferences_path(app: &impl tauri::Manager<tauri::Wry>) -> std::path::PathBuf {
+    app.path()
+        .app_config_dir()
+        .map(|dir| dir.join("preferences.json"))
+        .unwrap_or_else(|_| std::env::temp_dir().join("keypulse-preferences.json"))
+}
+
+fn read_data_location(app: &impl tauri::Manager<tauri::Wry>) -> String {
+    let file = preferences_path(app);
+    if let Ok(raw) = std::fs::read_to_string(&file) {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) {
+            if let Some(kind) = value.get("dataLocation").and_then(|v| v.as_str()) {
+                return kind.to_string();
+            }
+        }
+    }
+    "appdata".into()
+}
+
+fn write_data_location(app: &impl tauri::Manager<tauri::Wry>, kind: &str) -> Result<(), String> {
+    let file = preferences_path(app);
+    if let Some(parent) = file.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let value = serde_json::json!({ "dataLocation": kind });
+    std::fs::write(&file, serde_json::to_string_pretty(&value).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())
+}
+
+fn resolve_db_path(app: &impl tauri::Manager<tauri::Wry>) -> Result<std::path::PathBuf, String> {
+    let location = read_data_location(app);
+    if location == "appdir" {
+        let exe_dir = std::env::current_exe()
+            .map_err(|e| e.to_string())?
+            .parent()
+            .map(|p| p.to_path_buf())
+            .ok_or_else(|| "cannot resolve executable directory".to_string())?;
+        let candidate = exe_dir.join("keypulse-data");
+        // Installed builds live under Program Files which is read-only for
+        // normal users; fall back to AppData when the portable folder is not
+        // writable.
+        if std::fs::create_dir_all(&candidate).is_ok() {
+            let probe = candidate.join(".write-test");
+            if std::fs::write(&probe, b"1").is_ok() {
+                let _ = std::fs::remove_file(&probe);
+                return Ok(candidate.join("keypulse.sqlite"));
+            }
+        }
+    }
+    let appdata = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&appdata).map_err(|e| e.to_string())?;
+    Ok(appdata.join("keypulse.sqlite"))
+}
+
+/// Move the SQLite file (plus WAL/SHM sidecars) to the requested location and
+/// record the preference. Takes effect on the next launch.
+#[tauri::command]
+fn set_data_location(app: tauri::AppHandle, kind: String) -> Result<String, String> {
+    if kind != "appdata" && kind != "appdir" {
+        return Err(format!("unsupported data location: {kind}"));
+    }
+    let current = resolve_db_path(&app)?;
+    let target_dir = if kind == "appdir" {
+        let exe_dir = std::env::current_exe()
+            .map_err(|e| e.to_string())?
+            .parent()
+            .map(|p| p.to_path_buf())
+            .ok_or_else(|| "cannot resolve executable directory".to_string())?;
+        exe_dir.join("keypulse-data")
+    } else {
+        app.path()
+            .app_data_dir()
+            .map_err(|e| e.to_string())?
+    };
+    std::fs::create_dir_all(&target_dir).map_err(|e| e.to_string())?;
+    let target = target_dir.join("keypulse.sqlite");
+    if current != target {
+        if !target.exists() && current.exists() {
+            for suffix in ["", "-wal", "-shm"] {
+                let src = std::path::PathBuf::from(format!("{}{}", current.display(), suffix));
+                if src.exists() {
+                    std::fs::copy(&src, format!("{}{}", target.display(), suffix))
+                        .map_err(|e| format!("copy failed: {e}"))?;
+                }
+            }
+        }
+        write_data_location(&app, &kind)?;
+    }
+    let dir = target.parent().map(|p| p.display().to_string()).unwrap_or_default();
+    Ok(format!("数据位置已切换为：{dir}\\keypulse.sqlite（重启后生效）"))
+}
+
+#[tauri::command]
+fn get_data_location(app: tauri::AppHandle) -> Result<String, String> {
+    let path = resolve_db_path(&app)?;
+    Ok(format!(
+        "{}|{}",
+        read_data_location(&app),
+        path.display().to_string()
+    ))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
-            let data_dir = app
-                .path()
-                .app_data_dir()
-                .map_err(|error| std::io::Error::other(error.to_string()))?;
-            std::fs::create_dir_all(&data_dir)?;
+            let db_path = resolve_db_path(app).map_err(std::io::Error::other)?;
+            if let Some(parent) = db_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
 
-            let store = StatsStore::open(&data_dir.join("keypulse.sqlite"))
-                .map_err(std::io::Error::other)?;
+            let store = StatsStore::open(&db_path).map_err(std::io::Error::other)?;
             let recording = RecordingState::default();
             let input_status = InputStatus::default();
             let listener_store = Arc::clone(&store);
@@ -240,8 +488,9 @@ pub fn run() {
                 }
             }
 
-            build_keyshow_overlay(app)?;
             app.manage(KeyshowPrefs::default());
+            build_keyshow_overlay(app)?;
+            build_mini_overlay(app)?;
             apply_keyshow_layout(app.handle()).map_err(std::io::Error::other)?;
             setup_tray(app)?;
             Ok(())
@@ -256,7 +505,13 @@ pub fn run() {
             clear_stats,
             toggle_keyshow,
             set_keyshow_position,
-            set_keyshow_size
+            set_keyshow_size,
+            set_keyshow_opacity,
+            set_keyshow_custom_position,
+            set_keyshow_drag_mode,
+            toggle_mini,
+            set_data_location,
+            get_data_location
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

@@ -7,6 +7,7 @@
  */
 import { onMounted, onUnmounted, ref } from "vue";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
 
 type KeyShowEvent = { kind: "key" | "mouse"; label: string; keyId: string; action: "down" | "up" };
 
@@ -22,6 +23,39 @@ const showHint = ref(true);
 // the medium baseline of 1080x190 so visuals stay crisp at every size.
 const contentScale = ref(1);
 const KEYSHOW_BASE_WIDTH = 1080;
+// Drag-to-place mode: a grab handle appears at the top; dragging moves the
+// overlay freely, locking (drag mode off) restores click-through.
+const dragMode = ref(false);
+const dragging = ref(false);
+let dragOffsetX = 0;
+let dragOffsetY = 0;
+let dragRaf = 0;
+
+function dragStart(event: PointerEvent) {
+  if (!dragMode.value) return;
+  dragging.value = true;
+  dragOffsetX = event.screenX - window.screenX;
+  dragOffsetY = event.screenY - window.screenY;
+  (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
+}
+
+function dragMove(event: PointerEvent) {
+  if (!dragging.value) return;
+  if (dragRaf) cancelAnimationFrame(dragRaf);
+  dragRaf = requestAnimationFrame(() => {
+    const dpr = window.devicePixelRatio || 1;
+    const x = Math.round((event.screenX - dragOffsetX) * dpr);
+    const y = Math.round((event.screenY - dragOffsetY) * dpr);
+    invoke("set_keyshow_custom_position", { x, y }).catch(() => undefined);
+  });
+}
+
+function dragEnd() {
+  dragging.value = false;
+  localStorage.setItem("keypulse-keyshow-pos", "custom");
+  localStorage.setItem("keypulse-keyshow-custom-x", String(window.screenX));
+  localStorage.setItem("keypulse-keyshow-custom-y", String(window.screenY));
+}
 
 function applyContentScale() {
   const scale = window.innerWidth / KEYSHOW_BASE_WIDTH;
@@ -64,10 +98,31 @@ function commitPendingMods() {
   }
 }
 
+const MAX_CAPSULE_ROWS = 8;
+
 function pushCapsule(segments: CapsuleSegment[], count: number) {
-  const cap: Capsule = { id: ++capsuleSeq, kind: "key", segments, count, born: Date.now() };
-  capsules.value = [...capsules.value, cap].slice(-8);
+  // A combo with many modifiers folds to "Ctrl + Shift + … + key" so the row
+  // never outgrows the overlay.
+  let folded = segments;
+  if (segments.length > 4) {
+    folded = [...segments.slice(0, 2), { label: "…", mod: true }, segments[segments.length - 1]];
+  }
+  const cap: Capsule = { id: ++capsuleSeq, kind: "key", segments: folded, count, born: Date.now() };
+  capsules.value = [...capsules.value, cap].slice(-MAX_CAPSULE_ROWS);
   refreshHideTimer();
+  trimOverflowingCapsules();
+}
+
+function trimOverflowingCapsules() {
+  requestAnimationFrame(() => {
+    const stage = document.querySelector<HTMLElement>(".capsule-stage");
+    if (!stage || capsules.value.length < 2) return;
+    let guard = 0;
+    while (stage.scrollWidth > stage.clientWidth + 2 && capsules.value.length > 1 && guard < MAX_CAPSULE_ROWS) {
+      capsules.value = capsules.value.slice(1);
+      guard += 1;
+    }
+  });
 }
 
 function onCapsuleDown(event: KeyShowEvent) {
@@ -100,6 +155,7 @@ function onCapsuleDown(event: KeyShowEvent) {
     last.born = now;
     capsules.value = [...capsules.value];
     refreshHideTimer();
+    trimOverflowingCapsules();
     return;
   }
   pushCapsule([{ label: event.label, mod: false }], 1);
@@ -201,6 +257,7 @@ function expireStaleLitKeys() {
 
 // ---------- lifecycle ----------
 let stopListener: UnlistenFn | undefined;
+let stopListenerDrag: UnlistenFn | undefined;
 let stopStorage: (() => void) | undefined;
 
 function syncTheme() {
@@ -219,6 +276,10 @@ onMounted(async () => {
   showFirstHint();
   stopListener = await listen<KeyShowEvent>("keyshow-event", (event) => {
     routeEvent(event.payload);
+  });
+  stopListenerDrag = await listen<boolean>("keyshow-dragmode", (event) => {
+    dragMode.value = event.payload;
+    if (!event.payload) dragging.value = false;
   });
   // Test hook for automated GUI acceptance (injects a synthetic key event).
   (window as unknown as Record<string, unknown>).__keyshowEvent = (payload: KeyShowEvent) => {
@@ -243,6 +304,11 @@ let pollTimer: ReturnType<typeof setInterval> | undefined;
 function pollSharedPrefs() {
   expireStaleLitKeys();
   applyContentScale();
+  const drag = localStorage.getItem("keypulse-keyshow-drag") === "1";
+  if (drag !== dragMode.value) {
+    dragMode.value = drag;
+    if (!drag) dragging.value = false;
+  }
   const style = localStorage.getItem("keypulse-keyshow-style") || "capsule";
   if (style !== lastStyle) {
     lastStyle = style;
@@ -268,6 +334,7 @@ function onStorage(event: StorageEvent) {
 
 onUnmounted(() => {
   stopListener?.();
+  stopListenerDrag?.();
   stopStorage?.();
   window.removeEventListener("resize", applyContentScale);
   document.documentElement.classList.remove("keyshow-window");
@@ -277,7 +344,9 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="keyshow-root" :data-caps="capsules.length" :data-bursts="bursts.length" :data-mode="mode" :data-scale="contentScale">
+  <div class="keyshow-root" :data-caps="capsules.length" :data-bursts="bursts.length" :data-mode="mode" :data-scale="contentScale" :data-drag="dragMode">
+    <div v-if="dragMode" class="ks-drag-handle" :class="{ active: dragging }" title="拖动到想要的位置，完成后在设置里锁定"
+      @pointerdown="dragStart" @pointermove="dragMove" @pointerup="dragEnd" @pointercancel="dragEnd">⠿ 拖动到喜欢的位置 — 松手即停</div>
     <p v-if="showHint" class="keyshow-hint">按键可视化已开启 — 按下的键会出现在这里 · 可在主界面切换风格</p>
     <div class="keyshow-content" :style="{ transform: `scale(${contentScale})` }">
 
@@ -323,9 +392,14 @@ onUnmounted(() => {
 .keyshow-content { flex: 0 0 auto; width: 1080px; height: 190px; display: flex; flex-direction: column; align-items: center; justify-content: end; transform-origin: center bottom; }
 .keyshow-hint { position: absolute; top: 6px; left: 50%; transform: translateX(-50%); padding: 6px 14px; border: 1px solid rgba(148,163,184,.2); border-radius: 999px; color: rgba(148,163,184,.9); background: rgba(4,9,24,.55); font-size: 11px; white-space: nowrap; animation: hint-in .3s ease; }
 @keyframes hint-in { from { opacity: 0; transform: translateX(-50%) translateY(6px); } }
+.ks-drag-handle { position: absolute; z-index: 5; top: 6px; left: 50%; transform: translateX(-50%); padding: 7px 18px; border: 1px solid rgba(var(--cyan-rgb), .5); border-radius: 999px; color: #eaf6ff; background: rgba(var(--pop-rgb), .92); box-shadow: 0 8px 22px rgba(0,0,0,.35); font-size: 12px; font-weight: 700; cursor: grab; user-select: none; white-space: nowrap; letter-spacing: .02em; }
+.ks-drag-handle:hover { border-color: rgba(var(--cyan-rgb), .9); box-shadow: 0 8px 26px rgba(var(--cyan-rgb), .3); }
+.ks-drag-handle.active { cursor: grabbing; transform: translateX(-50%) scale(1.03); }
 
 /* ---------- capsule stream ---------- */
-.capsule-stage { display: flex; gap: 10px; align-items: center; justify-content: center; padding-bottom: 14px; height: 90px; }
+.capsule-stage { display: flex; gap: 10px; align-items: center; justify-content: center; padding-bottom: 14px; height: 90px; max-width: 100%; overflow: hidden; }
+.cap-row { max-width: 100%; }
+.cap { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .particle-stage { position: relative; width: 1080px; height: 150px; }
 .mirror-stage { display: flex; flex-direction: column; align-items: center; gap: 8px; padding-bottom: 10px; }
 .cap-row { display: flex; gap: 5px; align-items: center; }

@@ -4,7 +4,8 @@
   "description": "Capability for the main window and the keyshow overlay",
   "windows": [
     "main",
-    "keys-overlay"
+    "keys-overlay",
+    "keys-mini"
   ],
   "permissions": [
     "core:default",
