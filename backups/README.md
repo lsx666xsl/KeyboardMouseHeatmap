@@ -31,3 +31,4 @@
 - [ ] MVP 完成快照
 
 每次创建快照后，在 `notes/开发日志.md` 和 `notes/交接说明.md` 中记录文件名及对应 Git commit。
+- 2026-09-04-themes-acceptance.zip — GUI 验收 + 统计修正 + 主题配色（commit 81c4b98）
