@@ -7,10 +7,11 @@
  *  - bubble     soft rising chirp
  *  - bell       soft wind-chime ding (bright but gentle)
  *  - mahjong    sharp wooden tile snap
+ *  - chick      playful "ji-ji-ji" chirp (internet-meme homage, fully synthesized)
  * The main window plays one click per accepted physical key press (driven by
  * keyshow-event), so repeats and injected events never fire sounds.
  */
-export type SoundVoice = "off" | "click" | "typewriter" | "bubble" | "bell" | "mahjong";
+export type SoundVoice = "off" | "click" | "typewriter" | "bubble" | "bell" | "mahjong" | "chick";
 
 let ctx: AudioContext | null = null;
 let voice: SoundVoice = "off";
@@ -124,6 +125,31 @@ export function playKeySound(heavy: boolean) {
       osc.stop(now + 0.55);
     }
     tone(ac, now, base / 2, 0.1, v * 0.12, "sine");
+  } else if (voice === "chick") {
+    // playful chicken chirps: three quick rising "ji"s then one long trill
+    const chirp = (at: number, freq: number, dur: number, peak: number, trill = false) => {
+      const osc = ac.createOscillator();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(freq, at);
+      osc.frequency.exponentialRampToValueAtTime(freq * 1.35, at + dur * 0.55);
+      if (trill) {
+        // vibrato tail: "ji——"
+        osc.frequency.exponentialRampToValueAtTime(freq * 0.85, at + dur);
+      } else {
+        osc.frequency.exponentialRampToValueAtTime(freq * 1.1, at + dur);
+      }
+      const gain = ac.createGain();
+      gain.gain.setValueAtTime(v * peak * MASTER_GAIN, at);
+      gain.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+      osc.connect(gain).connect(ac.destination);
+      osc.start(at);
+      osc.stop(at + dur + 0.02);
+    };
+    const base = heavy ? 1400 : 1800;
+    chirp(now, base, 0.06, 0.5);
+    chirp(now + 0.07, base * 1.12, 0.06, 0.5);
+    chirp(now + 0.14, base * 0.95, 0.09, 0.55);
+    chirp(now + 0.26, base * 1.05, heavy ? 0.34 : 0.24, 0.5, true);
   } else if (voice === "mahjong") {
     // sharp wooden tile snap: dense low-mid click + short body
     noiseBurst(ac, now, heavy ? 0.02 : 0.013, heavy ? 900 : 1300, v * (heavy ? 0.95 : 0.75), 1.6);

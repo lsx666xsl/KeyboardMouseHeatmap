@@ -788,7 +788,7 @@ onUnmounted(() => {
                 <div class="ks-layout-col"><div class="ks-layout-title">打字音效</div>
                   <div class="ks-sound-row">
                     <select class="ks-select" :value="soundVoice" @change="setSoundVoice(($event.target as HTMLSelectElement).value as SoundVoice)">
-                      <option value="off">关闭</option><option value="click">机械青轴</option><option value="typewriter">打字机</option><option value="bubble">泡泡</option><option value="bell">风铃🔔</option><option value="mahjong">麻将🀄</option>
+                      <option value="off">关闭</option><option value="click">机械青轴</option><option value="typewriter">打字机</option><option value="bubble">泡泡</option><option value="bell">风铃🔔</option><option value="mahjong">麻将🀄</option><option value="chick">小鸡🐤 只因你太美</option>
                     </select>
                     <label class="ks-range compact"><input type="range" min="0" max="100" step="5" :value="soundVolume" :disabled="soundVoice === 'off'" @input="setSoundVolume(Number(($event.target as HTMLInputElement).value))" /><span>{{ soundVolume }}</span></label>
                   </div>
