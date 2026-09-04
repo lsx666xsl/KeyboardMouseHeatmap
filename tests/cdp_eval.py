@@ -16,8 +16,18 @@ def get_page_ws_url(port=9222):
     raise RuntimeError(f"no page target found: {targets}")
 
 
-async def evaluate(expr, port=9222, await_promise=True):
-    ws_url, title, url = get_page_ws_url(port)
+def get_target_ws_url(port=9222, index=0):
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=5) as resp:
+        targets = json.loads(resp.read().decode())
+    pages = [t for t in targets if t.get("type") == "page"]
+    if not pages or index >= len(pages):
+        raise RuntimeError(f"page target {index} not found; have {len(pages)}")
+    target = pages[index]
+    return target["webSocketDebuggerUrl"], target.get("title", ""), target.get("url", "")
+
+
+async def evaluate(expr, port=9222, await_promise=True, target_index=0):
+    ws_url, title, url = get_target_ws_url(port, target_index)
     async with websockets.connect(ws_url, max_size=16 * 1024 * 1024) as ws:
         await ws.send(json.dumps({
             "id": 1,
@@ -44,12 +54,13 @@ def main():
         print("usage: cdp_eval.py <js-expression-file-or-inline>")
         return 2
     arg = sys.argv[1]
+    target_index = int(sys.argv[2]) if len(sys.argv) > 2 else 0
     if arg.startswith("@"):
         with open(arg[1:], encoding="utf-8") as fh:
             expr = fh.read()
     else:
         expr = arg
-    out = asyncio.run(evaluate(expr))
+    out = asyncio.run(evaluate(expr, target_index=target_index))
     print(json.dumps(out, ensure_ascii=False, indent=1))
     return 0 if "error" not in out else 1
 

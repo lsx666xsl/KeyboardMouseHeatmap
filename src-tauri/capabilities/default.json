@@ -1,8 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
-  "windows": ["main"],
+  "description": "Capability for the main window and the keyshow overlay",
+  "windows": [
+    "main",
+    "keys-overlay"
+  ],
   "permissions": [
     "core:default",
     "opener:default"

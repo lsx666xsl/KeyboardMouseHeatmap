@@ -1,6 +1,18 @@
+use serde::Serialize;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+
+/// Live keystroke/mouse action forwarded to the on-screen visualizer overlay.
+/// Emitted for every accepted physical press, independent of the recording flag.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyShowEvent {
+    pub kind: String,
+    pub label: String,
+    pub key_id: String,
+    pub action: String,
+}
 
 #[derive(Clone)]
 pub struct RecordingState {
@@ -77,6 +89,8 @@ mod windows_listener {
         },
         KeyUp {
             physical_code: u32,
+            key_id: String,
+            label: String,
         },
         Mouse {
             action_id: String,
@@ -233,17 +247,54 @@ mod windows_listener {
                             label,
                         } => {
                             let is_new_press = filter.accept_down(physical_code);
-                            if is_new_press && recording.enabled.load(Ordering::Relaxed) {
-                                store.record_key(&key_id, &label).is_ok()
+                            if is_new_press {
+                                // Live visualizer event fires for every accepted physical
+                                // press, independent of the recording pause state.
+                                let _ = app.emit(
+                                    "keyshow-event",
+                                    crate::input::KeyShowEvent {
+                                        kind: "key".into(),
+                                        label: label.clone(),
+                                        key_id: key_id.clone(),
+                                        action: "down".into(),
+                                    },
+                                );
+                                if recording.enabled.load(Ordering::Relaxed) {
+                                    store.record_key(&key_id, &label).is_ok()
+                                } else {
+                                    false
+                                }
                             } else {
                                 false
                             }
                         }
-                        NativeInput::KeyUp { physical_code } => {
+                        NativeInput::KeyUp {
+                            physical_code,
+                            key_id,
+                            label,
+                        } => {
                             filter.accept_up(physical_code);
+                            let _ = app.emit(
+                                "keyshow-event",
+                                crate::input::KeyShowEvent {
+                                    kind: "key".into(),
+                                    label,
+                                    key_id,
+                                    action: "up".into(),
+                                },
+                            );
                             false
                         }
                         NativeInput::Mouse { action_id, label } => {
+                            let _ = app.emit(
+                                "keyshow-event",
+                                crate::input::KeyShowEvent {
+                                    kind: "mouse".into(),
+                                    label: label.clone(),
+                                    key_id: action_id.clone(),
+                                    action: "down".into(),
+                                },
+                            );
                             recording.enabled.load(Ordering::Relaxed)
                                 && store.record_mouse(&action_id, &label).is_ok()
                         }
@@ -254,7 +305,7 @@ mod windows_listener {
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }
 
-            if dirty && last_emit.elapsed() >= Duration::from_millis(350) {
+            if dirty && last_emit.elapsed() >= Duration::from_millis(150) {
                 emit_snapshot(&app, &store);
                 dirty = false;
                 last_emit = Instant::now();
@@ -307,7 +358,17 @@ mod windows_listener {
                         });
                     }
                 } else if matches!(message, WM_KEYUP | WM_SYSKEYUP) {
-                    send_input(NativeInput::KeyUp { physical_code });
+                    let key_descriptor = key_descriptor(data.vkCode, data.scanCode, flags);
+                    send_input(NativeInput::KeyUp {
+                        physical_code,
+                        key_id: key_descriptor
+                            .as_ref()
+                            .map(|(key_id, _)| key_id.clone())
+                            .unwrap_or_default(),
+                        label: key_descriptor
+                            .map(|(_, label)| label)
+                            .unwrap_or_default(),
+                    });
                 }
             }
         }
