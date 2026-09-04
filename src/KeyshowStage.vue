@@ -485,7 +485,7 @@ onUnmounted(() => {
 .keyshow-content { flex: 0 0 auto; width: 1080px; height: 190px; display: flex; flex-direction: column; align-items: center; justify-content: end; transform-origin: center bottom; }
 .keyshow-hint { position: absolute; top: 6px; left: 50%; transform: translateX(-50%); padding: 6px 14px; border: 1px solid rgba(148,163,184,.2); border-radius: 999px; color: rgba(148,163,184,.9); background: rgba(4,9,24,.55); font-size: 11px; white-space: nowrap; animation: hint-in .3s ease; }
 @keyframes hint-in { from { opacity: 0; transform: translateX(-50%) translateY(6px); } }
-.ks-drag-handle { position: absolute; z-index: 5; top: 6px; left: 50%; transform: translateX(-50%); padding: 7px 18px; border: 1px solid rgba(var(--cyan-rgb), .5); border-radius: 999px; color: #eaf6ff; background: rgba(var(--pop-rgb), .92); box-shadow: 0 8px 22px rgba(0,0,0,.35); font-size: 12px; font-weight: 700; cursor: grab; user-select: none; white-space: nowrap; letter-spacing: .02em; }
+.ks-drag-handle { position: absolute; z-index: 5; top: 6px; left: 50%; transform: translateX(-50%); padding: 7px 18px; pointer-events: auto; border: 1px solid rgba(var(--cyan-rgb), .5); border-radius: 999px; color: #eaf6ff; background: rgba(var(--pop-rgb), .92); box-shadow: 0 8px 22px rgba(0,0,0,.35); font-size: 12px; font-weight: 700; cursor: grab; user-select: none; white-space: nowrap; letter-spacing: .02em; }
 .ks-drag-handle:hover { border-color: rgba(var(--cyan-rgb), .9); box-shadow: 0 8px 26px rgba(var(--cyan-rgb), .3); }
 .ks-drag-handle.active { cursor: grabbing; transform: translateX(-50%) scale(1.03); }
 
