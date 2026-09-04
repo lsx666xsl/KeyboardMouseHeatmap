@@ -50,8 +50,14 @@ function loadUsers() {
 function saveUsers() {
   fs.writeFileSync(DATA_FILE, JSON.stringify(users, null, 2));
 }
+// Passwords are stored as scrypt(pass, salt) — slow-hashed so weak passwords
+// are not trivially brute-forced on a public server. Legacy sha256 entries are
+// re-hashed on next successful login.
 function hashPass(pass, salt) {
-  return crypto.createHash("sha256").update(salt + ":" + pass).digest("hex");
+  return crypto.scryptSync(String(pass), salt, 32).toString("hex");
+}
+function isLegacyHash(pass, salt, stored) {
+  return crypto.createHash("sha256").update(salt + ":" + pass).digest("hex") === stored;
 }
 function dayStats(profile) {
   const days = profile.days || {};
@@ -124,12 +130,19 @@ const server = http.createServer(async (req, res) => {
       const { name, pass } = await readBody(req);
       const clean = String(name || "").trim();
       const user = users[clean];
-      if (!user || user.hash !== hashPass(String(pass || ""), user.salt)) {
+      const supplied = String(pass || "");
+      const ok = user && (user.hash === hashPass(supplied, user.salt) || isLegacyHash(supplied, user.salt, user.hash));
+      if (!ok) {
         return json(res, 401, { ok: false, error: "昵称或密码不对" });
+      }
+      // upgrade legacy sha256 hashes to scrypt on successful login
+      if (!user.hash.startsWith("scrypt") && user.hash !== hashPass(supplied, user.salt)) {
+        user.hash = hashPass(supplied, user.salt);
+        saveUsers();
       }
       const token = crypto.randomBytes(16).toString("hex");
       sessions.set(token, clean);
-      return json(res, 200, { ok: true, token, profile: publicProfile(clean) });
+      return json(res, 200, { ok: true, profile: publicProfile(clean) });
     }
     if (route === "/api/me") {
       const token = url.searchParams.get("token") || "";
