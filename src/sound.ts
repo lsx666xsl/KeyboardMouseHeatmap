@@ -8,10 +8,11 @@
  *  - bell       soft wind-chime ding (bright but gentle)
  *  - mahjong    sharp wooden tile snap
  *  - chick      playful "ji-ji-ji" chirp (internet-meme homage, fully synthesized)
+ *  - blub       underwater gurgle: a string of rising wet bubbles
  * The main window plays one click per accepted physical key press (driven by
  * keyshow-event), so repeats and injected events never fire sounds.
  */
-export type SoundVoice = "off" | "click" | "typewriter" | "bubble" | "bell" | "mahjong" | "chick";
+export type SoundVoice = "off" | "click" | "typewriter" | "bubble" | "blub" | "bell" | "mahjong" | "chick";
 
 let ctx: AudioContext | null = null;
 let voice: SoundVoice = "off";
@@ -125,6 +126,26 @@ export function playKeySound(heavy: boolean) {
       osc.stop(now + 0.55);
     }
     tone(ac, now, base / 2, 0.1, v * 0.12, "sine");
+  } else if (voice === "blub") {
+    // underwater gurgle: wet rising bubbles with a low watery filter
+    const bubbles = heavy ? 6 : 4;
+    for (let i = 0; i < bubbles; i++) {
+      const at = now + i * (heavy ? 0.095 : 0.075) + Math.random() * 0.02;
+      const rise = 170 + Math.random() * 240;
+      // bubble core: fast upward sine blip
+      const osc = ac.createOscillator();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(rise, at);
+      osc.frequency.exponentialRampToValueAtTime(rise * (2.1 + Math.random()), at + 0.06);
+      const gain = ac.createGain();
+      gain.gain.setValueAtTime(v * (0.5 - i * 0.05) * MASTER_GAIN, at);
+      gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.08);
+      osc.connect(gain).connect(ac.destination);
+      osc.start(at);
+      osc.stop(at + 0.1);
+      // watery lowpass plop behind each bubble
+      noiseBurst(ac, at, 0.05, 420, v * (0.3 - i * 0.03), 0.9);
+    }
   } else if (voice === "chick") {
     // playful chicken chirps: three quick rising "ji"s then one long trill
     const chirp = (at: number, freq: number, dur: number, peak: number, trill = false) => {
