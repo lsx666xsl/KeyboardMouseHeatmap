@@ -34,3 +34,4 @@
 - 2026-09-04-themes-acceptance.zip — GUI 验收 + 统计修正 + 主题配色（commit 81c4b98）
 - 2026-09-04-keyshow-overlay.zip — 实时按键可视化浮层（commit b9d6bb9）
 - 2026-09-04-keyshow-layout.zip — 按键浮层位置/大小自定义（含本阶段全部）
+- 2026-09-04-settings-hub.zip — 设置中心/透明度/拖动/迷你窗/六主题/数据迁移/新图标（commit 66d2a60）
