@@ -1,135 +1,215 @@
 /**
- * KeyPulse Cloud Duel relay — self-hosted room server for the typing duel.
+ * KeyPulse Cloud — self-hosted account + duel relay server.
  *
- * How to run:
- *   node pk-cloud-server.js            # listens on 0.0.0.0:7788
- *   PULSE_PORT=9000 node pk-cloud-server.js
+ * Run:  npm install ws && node pk-cloud-server.js   (PORT env, default 7788)
  *
- * Protocol (WebSocket JSON):
- *   client -> { t: "join", room: "any", name: "Alice" }
- *   client -> { t: "count", v: 123 }            (every ~1s while dueling)
- *   server -> { t: "peer", name: "Bob", v: 111 }
- *   server -> { t: "tick", left: 42 }
- *   client -> { t: "leave" }
+ * REST API (JSON):
+ *   POST /api/register      { name, pass }            -> { ok, token?, error? }
+ *   POST /api/login         { name, pass }            -> { ok, token, profile? } | { ok:false, error }
+ *   GET  /api/me?token=..                            -> { name, best, wins, losses, games }
+ *   POST /api/result        { token, win, score }     -> updated profile
+ *   GET  /api/leaderboard                             -> [{ name, best, wins, losses, games }] top 50
+ *   POST /api/logout        { token }
  *
- * A "duel" is simply two clients in the same room. The server relays counts
- * and runs the 60s clock when the second player joins. No accounts, no
- * storage: the server is stateless and forgets everything on restart.
+ * WebSocket (duel relay, room of 2):
+ *   join with ?token= and room:  ws://host:PORT/ws?token=..&room=any
+ *   (same {t:"count"|"tick"|"peer"|"ended"} frames as before)
  *
- * To wire the desktop client to this server later: add a "cloud" transport in
- * src-tauri/src/pk.rs that opens a WebSocket instead of the LAN TCP channel —
- * the message shapes above already match the LAN relay format.
+ * Accounts persist to users.json next to the server (passwords hashed with
+ * salt + sha256, no plaintext stored). Sessions are in-memory; restarting the
+ * server logs everyone out (tokens re-issued on next login).
  */
 "use strict";
 
 const http = require("http");
+const fs = require("fs");
+const path = require("path");
+const crypto = require("crypto");
 const { WebSocketServer } = require("ws");
 
 const PORT = Number(process.env.PULSE_PORT || 7788);
+const DATA_FILE = path.join(__dirname, "users.json");
 const DURATION = 60;
 
-const rooms = new Map(); // roomId -> { players: Map<ws, {name, count, clock?}> , timer }
+let users = {}; // name -> { salt, hash, best, wins, losses, games }
+let sessions = new Map(); // token -> name
+const rooms = new Map(); // roomId -> { players: Map<ws,{name,count}>, timer }
 
-function roomOf(ws) {
-  for (const room of rooms.values()) {
-    if (room.players.has(ws)) return room;
+function loadUsers() {
+  try {
+    users = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+  } catch {
+    users = {};
   }
-  return null;
+}
+function saveUsers() {
+  fs.writeFileSync(DATA_FILE, JSON.stringify(users, null, 2));
+}
+function hashPass(pass, salt) {
+  return crypto.createHash("sha256").update(salt + ":" + pass).digest("hex");
+}
+function publicProfile(name) {
+  const u = users[name];
+  if (!u) return null;
+  return { name, best: u.best, wins: u.wins, losses: u.losses, games: u.games };
 }
 
+function json(res, code, body) {
+  const text = JSON.stringify(body);
+  res.writeHead(code, {
+    "content-type": "application/json; charset=utf-8",
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-headers": "content-type",
+  });
+  res.end(text);
+}
+function readBody(req) {
+  return new Promise((resolve) => {
+    let data = "";
+    req.on("data", (c) => { data += c; if (data.length > 1e6) req.destroy(); });
+    req.on("end", () => {
+      try { resolve(JSON.parse(data || "{}")); } catch { resolve({}); }
+    });
+  });
+}
+
+const server = http.createServer(async (req, res) => {
+  if (req.method === "OPTIONS") return json(res, 204, {});
+  const url = new URL(req.url, "http://localhost");
+  const route = url.pathname;
+  try {
+    if (route === "/api/register" && req.method === "POST") {
+      const { name, pass } = await readBody(req);
+      const clean = String(name || "").trim().slice(0, 16);
+      if (!/^[\w\u4e00-\u9fa5]{2,16}$/.test(clean)) {
+        return json(res, 400, { ok: false, error: "昵称需 2-16 位中文/字母/数字" });
+      }
+      if (String(pass || "").length < 4) {
+        return json(res, 400, { ok: false, error: "密码至少 4 位" });
+      }
+      if (users[clean]) return json(res, 409, { ok: false, error: "该昵称已被注册" });
+      const salt = crypto.randomBytes(8).toString("hex");
+      users[clean] = { salt, hash: hashPass(pass, salt), best: 0, wins: 0, losses: 0, games: 0 };
+      saveUsers();
+      const token = crypto.randomBytes(16).toString("hex");
+      sessions.set(token, clean);
+      return json(res, 200, { ok: true, token, profile: publicProfile(clean) });
+    }
+    if (route === "/api/login" && req.method === "POST") {
+      const { name, pass } = await readBody(req);
+      const clean = String(name || "").trim();
+      const user = users[clean];
+      if (!user || user.hash !== hashPass(String(pass || ""), user.salt)) {
+        return json(res, 401, { ok: false, error: "昵称或密码不对" });
+      }
+      const token = crypto.randomBytes(16).toString("hex");
+      sessions.set(token, clean);
+      return json(res, 200, { ok: true, token, profile: publicProfile(clean) });
+    }
+    if (route === "/api/me") {
+      const token = url.searchParams.get("token") || "";
+      const name = sessions.get(token);
+      if (!name) return json(res, 401, { ok: false, error: "未登录或登录已过期" });
+      return json(res, 200, { ok: true, profile: publicProfile(name) });
+    }
+    if (route === "/api/result" && req.method === "POST") {
+      const { token, win, score } = await readBody(req);
+      const name = sessions.get(String(token || ""));
+      if (!name) return json(res, 401, { ok: false, error: "未登录" });
+      const u = users[name];
+      u.games += 1;
+      if (win) u.wins += 1; else u.losses += 1;
+      if (Number(score) > u.best) u.best = Number(score);
+      saveUsers();
+      return json(res, 200, { ok: true, profile: publicProfile(name) });
+    }
+    if (route === "/api/leaderboard") {
+      const list = Object.values(users)
+        .map((u, i) => ({ name: Object.keys(users)[i], ...u }))
+        .sort((a, b) => b.best - a.best || b.wins - a.wins)
+        .slice(0, 50)
+        .map((u) => ({ name: u.name, best: u.best, wins: u.wins, losses: u.losses, games: u.games }));
+      return json(res, 200, { ok: true, list });
+    }
+    if (route === "/api/logout" && req.method === "POST") {
+      const { token } = await readBody(req);
+      sessions.delete(String(token || ""));
+      return json(res, 200, { ok: true });
+    }
+    res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+    res.end("KeyPulse cloud server: REST auth APIs + duel relay\n");
+  } catch (error) {
+    json(res, 500, { ok: false, error: String(error) });
+  }
+});
+
+const wss = new WebSocketServer({ server, path: "/ws" });
+wss.on("connection", (ws, req) => {
+  const url = new URL(req.url, "http://localhost");
+  const token = url.searchParams.get("token") || "";
+  const name = sessions.get(token);
+  const roomId = url.searchParams.get("room") || "default";
+  if (!name) {
+    ws.close(4001, "unauthorized");
+    return;
+  }
+  let room = rooms.get(roomId);
+  if (!room) { room = { players: new Map(), timer: null }; rooms.set(roomId, room); }
+  if (room.players.size >= 2) {
+    ws.send(JSON.stringify({ t: "error", message: "房间已满" }));
+    return;
+  }
+  room.players.set(ws, { name, count: 0 });
+  ws.send(JSON.stringify({ t: "joined", name, room: roomId }));
+  broadcast(room, { t: "peerJoined", name }, ws);
+  if (room.players.size === 2) {
+    startClock(room);
+    broadcast(room, { t: "started", seconds: DURATION });
+  }
+  ws.on("message", (raw) => {
+    let msg;
+    try { msg = JSON.parse(raw.toString()); } catch { return; }
+    if (msg.t === "count") {
+      const player = room.players.get(ws);
+      if (!player) return;
+      player.count = Number(msg.v) || 0;
+      for (const [other, otherPlayer] of room.players) {
+        if (other !== ws) other.send(JSON.stringify({ t: "peer", name: player.name, v: player.count }));
+      }
+    }
+  });
+  ws.on("close", () => {
+    room.players.delete(ws);
+    if (room.players.size === 0) {
+      clearInterval(room.timer);
+      for (const [id, candidate] of rooms) if (candidate === room) rooms.delete(id);
+    } else {
+      broadcast(room, { t: "peerLeft" }, null);
+    }
+  });
+});
 function broadcast(room, msg, except) {
   const text = JSON.stringify(msg);
   for (const ws of room.players.keys()) {
     if (ws !== except && ws.readyState === ws.OPEN) ws.send(text);
   }
 }
-
 function startClock(room) {
   if (room.timer) return;
   let left = DURATION;
   room.timer = setInterval(() => {
     left -= 1;
-    broadcast(room, { t: "tick", left });
+    broadcast(room, { t: "tick", left }, null);
     if (left <= 0) {
       clearInterval(room.timer);
       room.timer = null;
-      broadcast(room, { t: "ended" });
+      broadcast(room, { t: "ended" }, null);
     }
   }, 1000);
 }
 
-const server = http.createServer((req, res) => {
-  res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
-  res.end("KeyPulse cloud duel relay is running\n");
-});
-
-const wss = new WebSocketServer({ server });
-
-wss.on("connection", (ws) => {
-  ws.on("message", (raw) => {
-    let msg;
-    try {
-      msg = JSON.parse(raw.toString());
-    } catch {
-      return;
-    }
-    if (msg.t === "join") {
-      const roomId = msg.room || "default";
-      let room = rooms.get(roomId);
-      if (!room) {
-        room = { players: new Map(), timer: null };
-        rooms.set(roomId, room);
-      }
-      if (room.players.size >= 2) {
-        ws.send(JSON.stringify({ t: "error", message: "房间已满，等待旁观者离开" }));
-        return;
-      }
-      room.players.set(ws, { name: String(msg.name || "玩家").slice(0, 16), count: 0 });
-      broadcast(room, { t: "joined", players: [...room.players.values()].map((p) => p.name) });
-      if (room.players.size === 2) {
-        startClock(room);
-        broadcast(room, { t: "started", seconds: DURATION });
-      }
-    } else if (msg.t === "count") {
-      const room = roomOf(ws);
-      if (!room) return;
-      const player = room.players.get(ws);
-      if (!player) return;
-      player.count = Number(msg.v) || 0;
-      for (const [other, otherPlayer] of room.players) {
-        if (other !== ws) {
-          other.send(JSON.stringify({ t: "peer", name: player.name, v: player.count }));
-        }
-      }
-    } else if (msg.t === "leave") {
-      const room = roomOf(ws);
-      if (room) {
-        room.players.delete(ws);
-        if (room.players.size === 0) {
-          clearInterval(room.timer);
-          rooms.delete(roomOf(ws).players.size === 0 ? [...rooms.keys()].find((k) => rooms.get(k) === room) : "default");
-        } else {
-          broadcast(room, { t: "peerLeft" });
-        }
-      }
-    }
-  });
-
-  ws.on("close", () => {
-    const room = roomOf(ws);
-    if (!room) return;
-    room.players.delete(ws);
-    if (room.players.size === 0) {
-      clearInterval(room.timer);
-      for (const [id, candidate] of rooms) {
-        if (candidate === room) rooms.delete(id);
-      }
-    } else {
-      broadcast(room, { t: "peerLeft" });
-    }
-  });
-});
-
+loadUsers();
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`KeyPulse cloud duel relay listening on 0.0.0.0:${PORT}`);
+  console.log(`KeyPulse cloud server on 0.0.0.0:${PORT} (REST /api/* + WS /ws)`);
 });

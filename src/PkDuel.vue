@@ -89,6 +89,22 @@ function endDuel() {
   reportTimer = undefined;
   phase.value = "result";
   message.value = "";
+  syncCloudResult();
+}
+
+async function syncCloudResult() {
+  const server = localStorage.getItem("kp-cloud-server");
+  const token = localStorage.getItem("kp-cloud-token");
+  if (!server || !token) return;
+  try {
+    await fetch(server + "/api/result", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token, win: isWinner(), score: myScore.value }),
+    });
+  } catch {
+    // cloud offline: duel result stays local only
+  }
 }
 
 async function stopAll() {

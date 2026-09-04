@@ -9,6 +9,7 @@ import MiniStat from "./MiniStat.vue";
 import { configureSound, loadCustomSound, playKeySound, playMetronomeTick, type SoundVoice } from "./sound";
 import DailyCard from "./DailyCard.vue";
 import PkDuel from "./PkDuel.vue";
+import CloudAccount from "./CloudAccount.vue";
 
 // ============================================================
 // KeyPulse main dashboard window.
@@ -874,6 +875,29 @@ onUnmounted(() => {
           <div v-if="showSettingsPanel" class="ks-modal-backdrop" @click.self="showSettingsPanel = false">
             <section class="ks-modal" role="dialog" aria-modal="true" aria-label="设置" tabindex="-1" @keydown.esc="showSettingsPanel = false">
               <div class="ks-modal-head"><div><p class="eyebrow accent">SETTINGS</p><h3>设置</h3></div><button class="ks-modal-close" aria-label="关闭设置" @click="showSettingsPanel = false">×</button></div>
+              <div class="ks-section-title">我的档案</div>
+              <div v-if="activeProfile" class="profile-current">
+                <i class="profile-avatar" :style="{ background: activeProfile.color }"></i>
+                <span class="profile-meta"><b>{{ activeProfile.name }}</b><small>最佳 {{ activeProfile.best }} 键 · 胜 {{ activeProfile.wins }} 负 {{ activeProfile.losses }} · {{ activeProfile.games }} 局</small></span>
+                <button class="ks-radio small" @click="promptRename(activeProfile)">改名</button>
+              </div>
+              <div class="profile-colors" role="radiogroup" aria-label="档案颜色">
+                <button v-for="color in profileColors" :key="color" class="profile-color" :class="{ active: activeProfile?.color === color }" :style="{ background: color }" :aria-checked="activeProfile?.color === color" role="radio" @click="setProfileColor(activeProfile?.id ?? '', color)"></button>
+              </div>
+              <div class="profile-list">
+                <div v-for="profile in profiles" :key="profile.id" class="profile-row" :class="{ active: profile.id === activeProfile?.id }">
+                  <i class="profile-avatar" :style="{ background: profile.color }"></i>
+                  <span class="profile-meta"><b>{{ profile.name }}</b><small>最佳 {{ profile.best }} · {{ profile.wins }}胜 / {{ profile.losses }}负</small></span>
+                  <button v-if="profile.id !== activeProfile?.id" class="profile-action" @click="switchProfile(profile.id)">切换</button>
+                  <button v-if="profile.id !== activeProfile?.id" class="profile-action danger" @click="deleteProfile(profile.id)">删除</button>
+                  <span v-else class="profile-action current-tag">当前</span>
+                </div>
+              </div>
+              <div class="profile-create">
+                <input v-model="newProfileName" maxlength="16" placeholder="新档案昵称…" @keydown.enter="createProfile" />
+                <button class="profile-action add" @click="createProfile">＋ 新建档案</button>
+              </div>
+              <CloudAccount />
               <div class="ks-section-title">主题配色</div>
               <div class="settings-themes" role="radiogroup" aria-label="主题配色">
                 <button v-for="option in themeOptions" :key="option.id" role="radio" :aria-checked="themeId === option.id" :class="{ active: themeId === option.id }" class="setting-theme" @click="applyTheme(option.id)"><span class="theme-dots"><i v-for="(dot, dotIndex) in option.dots" :key="dotIndex" :style="{ background: dot }"></i></span>{{ option.name }}</button>
@@ -908,28 +932,6 @@ onUnmounted(() => {
               </div>
               <div class="ks-section-title">迷你统计窗</div>
               <button class="keyshow-master" :class="{ on: miniEnabled }" @click="toggleMini"><span class="ks-master-text"><b>{{ miniEnabled ? "迷你窗已显示" : "迷你窗已隐藏" }}</b><small>{{ miniEnabled ? "右上角小卡片实时显示今日总量与冠军键" : "开启后在桌面右上角显示实时统计小卡片" }}</small></span><span class="ks-switch"><i></i></span></button>
-              <div class="ks-section-title">我的档案</div>
-              <div v-if="activeProfile" class="profile-current">
-                <i class="profile-avatar" :style="{ background: activeProfile.color }"></i>
-                <span class="profile-meta"><b>{{ activeProfile.name }}</b><small>最佳 {{ activeProfile.best }} 键 · 胜 {{ activeProfile.wins }} 负 {{ activeProfile.losses }} · {{ activeProfile.games }} 局</small></span>
-                <button class="ks-radio small" @click="promptRename(activeProfile)">改名</button>
-              </div>
-              <div class="profile-colors" role="radiogroup" aria-label="档案颜色">
-                <button v-for="color in profileColors" :key="color" class="profile-color" :class="{ active: activeProfile?.color === color }" :style="{ background: color }" :aria-checked="activeProfile?.color === color" role="radio" @click="setProfileColor(activeProfile?.id ?? '', color)"></button>
-              </div>
-              <div class="profile-list">
-                <div v-for="profile in profiles" :key="profile.id" class="profile-row" :class="{ active: profile.id === activeProfile?.id }">
-                  <i class="profile-avatar" :style="{ background: profile.color }"></i>
-                  <span class="profile-meta"><b>{{ profile.name }}</b><small>最佳 {{ profile.best }} · {{ profile.wins }}胜 / {{ profile.losses }}负</small></span>
-                  <button v-if="profile.id !== activeProfile?.id" class="profile-action" @click="switchProfile(profile.id)">切换</button>
-                  <button v-if="profile.id !== activeProfile?.id" class="profile-action danger" @click="deleteProfile(profile.id)">删除</button>
-                  <span v-else class="profile-action current-tag">当前</span>
-                </div>
-              </div>
-              <div class="profile-create">
-                <input v-model="newProfileName" maxlength="16" placeholder="新档案昵称…" @keydown.enter="createProfile" />
-                <button class="profile-action add" @click="createProfile">＋ 新建档案</button>
-              </div>
               <div class="ks-section-title">启动与关闭</div>
               <div class="ks-behavior-row">
                 <button class="ks-drag-toggle" :class="{ on: autostartOn }" @click="toggleAutostart(!autostartOn)"><span class="ks-master-text"><b>{{ autostartOn ? "开机自启动已开" : "开机自启动已关" }}</b><small>{{ autostartOn ? "登录 Windows 后自动在后台运行" : "开机时不会自动启动" }}</small></span><span class="ks-switch"><i></i></span></button>
