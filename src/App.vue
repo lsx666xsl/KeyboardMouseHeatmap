@@ -154,7 +154,9 @@ async function toggleMini() {
 // through localStorage polling + Rust commands; see KeyshowStage.vue)
 
 // ---------- fun: sound, achievements, count-up ----------
-const soundVoice = ref<SoundVoice>((localStorage.getItem("keypulse-sound") as SoundVoice) || "off");
+const SOUND_IDS: SoundVoice[] = ["off", "click", "typewriter", "bubble", "blub", "bell", "mahjong", "arcade", "laser"];
+const savedVoice = localStorage.getItem("keypulse-sound") as SoundVoice | null;
+const soundVoice = ref<SoundVoice>(savedVoice && SOUND_IDS.includes(savedVoice) ? savedVoice : "off");
 const soundVolume = ref(Number(localStorage.getItem("keypulse-sound-volume")) || 60);
 const achievementsOn = ref(localStorage.getItem("keypulse-achievements") !== "0");
 const toastMsg = ref("");
@@ -788,7 +790,7 @@ onUnmounted(() => {
                 <div class="ks-layout-col"><div class="ks-layout-title">打字音效</div>
                   <div class="ks-sound-row">
                     <select class="ks-select" :value="soundVoice" @change="setSoundVoice(($event.target as HTMLSelectElement).value as SoundVoice)">
-                      <option value="off">关闭</option><option value="click">机械青轴</option><option value="typewriter">打字机</option><option value="bubble">泡泡</option><option value="blub">咕噜气泡</option><option value="bell">风铃</option><option value="mahjong">麻将</option><option value="chick">只因你太美（小鸡）</option><option value="jntm">鸡你太美（哼唱）</option>
+                      <option value="off">关闭</option><option value="click">机械青轴</option><option value="typewriter">打字机</option><option value="bubble">泡泡</option><option value="blub">咕噜气泡</option><option value="bell">风铃</option><option value="mahjong">麻将</option><option value="arcade">8bit 游戏机</option><option value="laser">激光枪</option>
                     </select>
                     <label class="ks-range compact"><input type="range" min="0" max="100" step="5" :value="soundVolume" :disabled="soundVoice === 'off'" @input="setSoundVolume(Number(($event.target as HTMLInputElement).value))" /><span>{{ soundVolume }}</span></label>
                   </div>

@@ -5,15 +5,15 @@
  *  - click      mechanical blue-switch tick (noise burst + body thump)
  *  - typewriter crisp high tick
  *  - bubble     soft rising chirp
+ *  - blub       underwater gurgle: a string of rising wet bubbles
  *  - bell       soft wind-chime ding (bright but gentle)
  *  - mahjong    sharp wooden tile snap
- *  - chick      playful "ji-ji-ji" chirp (internet-meme homage, fully synthesized)
- *  - blub       underwater gurgle: a string of rising wet bubbles
- *  - jntm       synthesized hum of the "ji ni tai mei" meme phrase (no samples)
+ *  - arcade     retro 8-bit "beep-doop"
+ *  - laser      sci-fi pew downward sweep
  * The main window plays one click per accepted physical key press (driven by
  * keyshow-event), so repeats and injected events never fire sounds.
  */
-export type SoundVoice = "off" | "click" | "typewriter" | "bubble" | "blub" | "bell" | "mahjong" | "chick" | "jntm";
+export type SoundVoice = "off" | "click" | "typewriter" | "bubble" | "blub" | "bell" | "mahjong" | "arcade" | "laser";
 
 let ctx: AudioContext | null = null;
 let voice: SoundVoice = "off";
@@ -112,102 +112,35 @@ export function playKeySound(heavy: boolean) {
     osc.connect(gain).connect(ac.destination);
     osc.start(t0);
     osc.stop(t0 + 0.11);
-  } else if (voice === "bell") {
-    // wind chime: layered sine partials with long decay; deep keys ring lower
-    const base = heavy ? 1320 : 1760;
-    for (const [ratio, peak] of [[1, 0.5], [2.76, 0.2], [5.4, 0.1]] as Array<[number, number]>) {
+  } else if (voice === "arcade") {
+    // retro 8-bit: short square-wave "beep-doop" coin-up feel
+    const steps = heavy ? 3 : 2;
+    for (let i = 0; i < steps; i++) {
+      const at = now + i * (heavy ? 0.11 : 0.08);
+      const freq = 880 * (i % 2 === 0 ? 1 : 1.5);
       const osc = ac.createOscillator();
-      osc.type = "sine";
-      osc.frequency.value = base * ratio;
+      osc.type = "square";
+      osc.frequency.value = freq;
       const gain = ac.createGain();
-      gain.gain.setValueAtTime(v * peak * MASTER_GAIN, now);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + (heavy ? 0.5 : 0.32));
-      osc.connect(gain).connect(ac.destination);
-      osc.start(now);
-      osc.stop(now + 0.55);
-    }
-    tone(ac, now, base / 2, 0.1, v * 0.12, "sine");
-  } else if (voice === "jntm") {
-    // "ji ni tai mei" hum: four syllables sung twice, electro-vocal timbre.
-    // Pure synthesis (saw + triangle through a lowpass), no audio samples.
-    const beat = heavy ? 0.125 : 0.1;
-    const root = heavy ? 320 : 400; // lower & sillier on heavy keys
-    // syllable pitch contour: ji ni tai mei -> ji ni tai mei
-    const contour = [1, 1.12, 1.26, 1.12, 1, 1.12, 1.26, 1.02];
-    const sing = (at: number, freq: number, dur: number, peak: number, bend: number) => {
-      const filter = ac.createBiquadFilter();
-      filter.type = "lowpass";
-      filter.frequency.value = 1500;
-      const osc = ac.createOscillator();
-      osc.type = "sawtooth";
-      osc.frequency.setValueAtTime(freq * 0.97, at);
-      osc.frequency.exponentialRampToValueAtTime(freq * bend, at + dur * 0.6);
-      // vibrato on sustained notes
-      const lfo = ac.createOscillator();
-      lfo.frequency.value = 5.5;
-      const lfoGain = ac.createGain();
-      lfoGain.gain.value = freq * 0.012;
-      lfo.connect(lfoGain).connect(osc.frequency);
-      const gain = ac.createGain();
-      gain.gain.setValueAtTime(0.0001, at);
-      gain.gain.exponentialRampToValueAtTime(v * peak * MASTER_GAIN, at + 0.012);
-      gain.gain.exponentialRampToValueAtTime(0.0001, at + dur);
-      osc.connect(filter).connect(gain).connect(ac.destination);
-      osc.start(at); osc.stop(at + dur + 0.03);
-      lfo.start(at); lfo.stop(at + dur + 0.03);
-    };
-    contour.forEach((ratio, i) => {
-      const at = now + i * beat;
-      const isLast = i === contour.length - 1;
-      sing(at, root * ratio, isLast ? beat * 2.4 : beat * 0.8, 0.4, isLast ? 0.82 : 1.04);
-    });
-    // soft bass thump to keep it bouncy
-    tone(ac, now, root * 0.5, beat * 0.9, v * 0.18, "sine");
-  } else if (voice === "blub") {
-    // underwater gurgle: wet rising bubbles with a low watery filter
-    const bubbles = heavy ? 6 : 4;
-    for (let i = 0; i < bubbles; i++) {
-      const at = now + i * (heavy ? 0.095 : 0.075) + Math.random() * 0.02;
-      const rise = 170 + Math.random() * 240;
-      // bubble core: fast upward sine blip
-      const osc = ac.createOscillator();
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(rise, at);
-      osc.frequency.exponentialRampToValueAtTime(rise * (2.1 + Math.random()), at + 0.06);
-      const gain = ac.createGain();
-      gain.gain.setValueAtTime(v * (0.5 - i * 0.05) * MASTER_GAIN, at);
-      gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.08);
+      gain.gain.setValueAtTime(v * 0.24 * MASTER_GAIN, at);
+      gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.09);
       osc.connect(gain).connect(ac.destination);
       osc.start(at);
-      osc.stop(at + 0.1);
-      // watery lowpass plop behind each bubble
-      noiseBurst(ac, at, 0.05, 420, v * (0.3 - i * 0.03), 0.9);
+      osc.stop(at + 0.11);
     }
-  } else if (voice === "chick") {
-    // playful chicken chirps: three quick rising "ji"s then one long trill
-    const chirp = (at: number, freq: number, dur: number, peak: number, trill = false) => {
-      const osc = ac.createOscillator();
-      osc.type = "triangle";
-      osc.frequency.setValueAtTime(freq, at);
-      osc.frequency.exponentialRampToValueAtTime(freq * 1.35, at + dur * 0.55);
-      if (trill) {
-        // vibrato tail: "ji——"
-        osc.frequency.exponentialRampToValueAtTime(freq * 0.85, at + dur);
-      } else {
-        osc.frequency.exponentialRampToValueAtTime(freq * 1.1, at + dur);
-      }
-      const gain = ac.createGain();
-      gain.gain.setValueAtTime(v * peak * MASTER_GAIN, at);
-      gain.gain.exponentialRampToValueAtTime(0.0001, at + dur);
-      osc.connect(gain).connect(ac.destination);
-      osc.start(at);
-      osc.stop(at + dur + 0.02);
-    };
-    const base = heavy ? 1400 : 1800;
-    chirp(now, base, 0.06, 0.5);
-    chirp(now + 0.07, base * 1.12, 0.06, 0.5);
-    chirp(now + 0.14, base * 0.95, 0.09, 0.55);
-    chirp(now + 0.26, base * 1.05, heavy ? 0.34 : 0.24, 0.5, true);
+  } else if (voice === "laser") {
+    // sci-fi pew: sharp downward sweep, longer for heavy keys
+    const osc = ac.createOscillator();
+    osc.type = "square";
+    osc.frequency.setValueAtTime(1500, now);
+    osc.frequency.exponentialRampToValueAtTime(heavy ? 140 : 260, now + (heavy ? 0.22 : 0.13));
+    const gain = ac.createGain();
+    gain.gain.setValueAtTime(v * 0.3 * MASTER_GAIN, now);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + (heavy ? 0.24 : 0.15));
+    osc.connect(gain).connect(ac.destination);
+    osc.start(now);
+    osc.stop(now + (heavy ? 0.26 : 0.16));
+    noiseBurst(ac, now + (heavy ? 0.16 : 0.09), 0.05, 2400, v * 0.1);
   } else if (voice === "mahjong") {
     // sharp wooden tile snap: dense low-mid click + short body
     noiseBurst(ac, now, heavy ? 0.02 : 0.013, heavy ? 900 : 1300, v * (heavy ? 0.95 : 0.75), 1.6);
