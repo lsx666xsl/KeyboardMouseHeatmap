@@ -565,10 +565,18 @@ fn get_data_location(app: tauri::AppHandle) -> Result<String, String> {
 /// Launch & close preferences shared with the frontend.
 /// start: "normal" | "minimized" | "tray"   (tray hides the main window)
 /// close: "tray" | "minimize" | "quit"
-#[derive(Default)]
 pub struct AppBehavior {
     pub start: Mutex<String>,
     pub close: Mutex<String>,
+}
+
+impl Default for AppBehavior {
+    fn default() -> Self {
+        Self {
+            start: Mutex::new("normal".into()),
+            close: Mutex::new("tray".into()),
+        }
+    }
 }
 
 impl AppBehavior {
