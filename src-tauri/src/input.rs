@@ -65,6 +65,7 @@ mod windows_listener {
     };
 
     const LLKHF_INJECTED_FLAG: u32 = 0x0000_0010;
+    const LLMHF_INJECTED_FLAG: u32 = 0x0000_0001;
     const KEYBOARD_WAKE_MESSAGE: u32 = WM_APP + 1;
 
     #[derive(Debug)]
@@ -317,52 +318,54 @@ mod windows_listener {
     unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
         if code == HC_ACTION as i32 && lparam.0 != 0 {
             let data = &*(lparam.0 as *const MSLLHOOKSTRUCT);
-            match wparam.0 as u32 {
-                WM_LBUTTONDOWN => send_input(NativeInput::Mouse {
-                    action_id: "left-click".into(),
-                    label: "左键".into(),
-                }),
-                WM_RBUTTONDOWN => send_input(NativeInput::Mouse {
-                    action_id: "right-click".into(),
-                    label: "右键".into(),
-                }),
-                WM_MBUTTONDOWN => send_input(NativeInput::Mouse {
-                    action_id: "middle-click".into(),
-                    label: "中键".into(),
-                }),
-                WM_XBUTTONDOWN => {
-                    let button = ((data.mouseData >> 16) & 0xffff) as u16;
-                    let suffix = if button == 1 { "1" } else { "2" };
-                    send_input(NativeInput::Mouse {
-                        action_id: format!("x-button-{suffix}"),
-                        label: format!("侧键{suffix}"),
-                    });
+            if data.flags & LLMHF_INJECTED_FLAG == 0 {
+                match wparam.0 as u32 {
+                    WM_LBUTTONDOWN => send_input(NativeInput::Mouse {
+                        action_id: "left-click".into(),
+                        label: "左键".into(),
+                    }),
+                    WM_RBUTTONDOWN => send_input(NativeInput::Mouse {
+                        action_id: "right-click".into(),
+                        label: "右键".into(),
+                    }),
+                    WM_MBUTTONDOWN => send_input(NativeInput::Mouse {
+                        action_id: "middle-click".into(),
+                        label: "中键".into(),
+                    }),
+                    WM_XBUTTONDOWN => {
+                        let button = ((data.mouseData >> 16) & 0xffff) as u16;
+                        let suffix = if button == 1 { "1" } else { "2" };
+                        send_input(NativeInput::Mouse {
+                            action_id: format!("x-button-{suffix}"),
+                            label: format!("侧键{suffix}"),
+                        });
+                    }
+                    WM_MOUSEWHEEL => {
+                        let delta = (data.mouseData >> 16) as i16;
+                        let (action_id, label) = if delta > 0 {
+                            ("wheel-up", "滚轮向上")
+                        } else {
+                            ("wheel-down", "滚轮向下")
+                        };
+                        send_input(NativeInput::Mouse {
+                            action_id: action_id.into(),
+                            label: label.into(),
+                        });
+                    }
+                    WM_MOUSEHWHEEL => {
+                        let delta = (data.mouseData >> 16) as i16;
+                        let (action_id, label) = if delta > 0 {
+                            ("wheel-right", "水平滚轮向右")
+                        } else {
+                            ("wheel-left", "水平滚轮向左")
+                        };
+                        send_input(NativeInput::Mouse {
+                            action_id: action_id.into(),
+                            label: label.into(),
+                        });
+                    }
+                    _ => {}
                 }
-                WM_MOUSEWHEEL => {
-                    let delta = (data.mouseData >> 16) as i16;
-                    let (action_id, label) = if delta > 0 {
-                        ("wheel-up", "滚轮向上")
-                    } else {
-                        ("wheel-down", "滚轮向下")
-                    };
-                    send_input(NativeInput::Mouse {
-                        action_id: action_id.into(),
-                        label: label.into(),
-                    });
-                }
-                WM_MOUSEHWHEEL => {
-                    let delta = (data.mouseData >> 16) as i16;
-                    let (action_id, label) = if delta > 0 {
-                        ("wheel-right", "水平滚轮向右")
-                    } else {
-                        ("wheel-left", "水平滚轮向左")
-                    };
-                    send_input(NativeInput::Mouse {
-                        action_id: action_id.into(),
-                        label: label.into(),
-                    });
-                }
-                _ => {}
             }
         }
 
