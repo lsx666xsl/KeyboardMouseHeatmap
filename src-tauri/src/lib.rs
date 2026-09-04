@@ -2,7 +2,7 @@ mod input;
 mod storage;
 
 use input::{InputListener, InputStatus, RecordingState};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use storage::{DashboardData, StatsStore};
 use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -56,8 +56,125 @@ fn toggle_keyshow(app: tauri::AppHandle) -> Result<bool, String> {
     toggle_keyshow_window(&app)
 }
 
-const KEYSHOW_WIDTH: f64 = 1080.0;
-const KEYSHOW_HEIGHT: f64 = 190.0;
+#[tauri::command]
+fn set_keyshow_position(app: tauri::AppHandle, position: String) -> Result<(), String> {
+    if !KEYSHOW_POSITIONS.contains(&position.as_str()) {
+        return Err(format!("unsupported keyshow position: {position}"));
+    }
+    let prefs = app.state::<KeyshowPrefs>();
+    *prefs
+        .position
+        .lock()
+        .map_err(|_| "keyshow prefs poisoned".to_string())? = position;
+    apply_keyshow_layout(&app)
+}
+
+#[tauri::command]
+fn set_keyshow_size(app: tauri::AppHandle, size: String) -> Result<(), String> {
+    if !KEYSHOW_SIZES.iter().any(|(id, _, _)| *id == size) {
+        return Err(format!("unsupported keyshow size: {size}"));
+    }
+    let prefs = app.state::<KeyshowPrefs>();
+    *prefs
+        .size
+        .lock()
+        .map_err(|_| "keyshow prefs poisoned".to_string())? = size;
+    apply_keyshow_layout(&app)
+}
+
+/// Built-in placements and sizes for the keyshow overlay window.
+const KEYSHOW_POSITIONS: [&str; 6] = [
+    "bottom-center",
+    "bottom-left",
+    "bottom-right",
+    "top-center",
+    "top-left",
+    "top-right",
+];
+const KEYSHOW_SIZES: [(&str, f64, f64); 3] = [
+    ("small", 860.0, 150.0),
+    ("medium", 1080.0, 190.0),
+    ("large", 1400.0, 250.0),
+];
+
+pub struct KeyshowPrefs {
+    position: Mutex<String>,
+    size: Mutex<String>,
+}
+
+impl Default for KeyshowPrefs {
+    fn default() -> Self {
+        Self {
+            position: Mutex::new("bottom-center".into()),
+            size: Mutex::new("medium".into()),
+        }
+    }
+}
+
+fn keyshow_geometry(size: &str) -> (f64, f64) {
+    KEYSHOW_SIZES
+        .iter()
+        .find(|(id, _, _)| *id == size)
+        .map(|(_, w, h)| (*w, *h))
+        .unwrap_or((1080.0, 190.0))
+}
+
+/// Compute the physical window bounds for the given placement inside the
+/// monitor work area (the area excluding the taskbar).
+fn keyshow_bounds(
+    position: &str,
+    area: &tauri::PhysicalRect<i32, u32>,
+    scale: f64,
+    width: f64,
+    height: f64,
+) -> (f64, f64) {
+    let margin = 24.0 * scale;
+    let left = area.position.x as f64 + margin;
+    let right = area.position.x as f64 + area.size.width as f64 - width - margin;
+    let top = area.position.y as f64 + margin;
+    let bottom = area.position.y as f64 + area.size.height as f64 - height - margin;
+    let center_x = area.position.x as f64 + (area.size.width as f64 - width) / 2.0;
+    match position {
+        "bottom-left" => (left, bottom),
+        "bottom-right" => (right, bottom),
+        "top-center" => (center_x, top),
+        "top-left" => (left, top),
+        "top-right" => (right, top),
+        _ => (center_x, bottom),
+    }
+}
+
+fn apply_keyshow_layout(app: &tauri::AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("keys-overlay")
+        .ok_or_else(|| "keyshow overlay window unavailable".to_string())?;
+    let prefs = app.state::<KeyshowPrefs>();
+    let position = prefs
+        .position
+        .lock()
+        .map_err(|_| "keyshow prefs poisoned".to_string())?
+        .clone();
+    let size = prefs
+        .size
+        .lock()
+        .map_err(|_| "keyshow prefs poisoned".to_string())?
+        .clone();
+    let (logical_w, logical_h) = keyshow_geometry(&size);
+    if let Some(monitor) = window.primary_monitor().map_err(|e| e.to_string())? {
+        let area = monitor.work_area();
+        let scale = monitor.scale_factor();
+        let width = logical_w * scale;
+        let height = logical_h * scale;
+        let (x, y) = keyshow_bounds(&position, &area, scale, width, height);
+        window
+            .set_size(Size::Physical(PhysicalSize::new(width as u32, height as u32)))
+            .map_err(|e| e.to_string())?;
+        window
+            .set_position(Position::Physical(PhysicalPosition::new(x as i32, y as i32)))
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
 
 fn toggle_keyshow_window(app: &tauri::AppHandle) -> Result<bool, String> {
     let window = app
@@ -77,7 +194,7 @@ fn build_keyshow_overlay(app: &tauri::App) -> tauri::Result<()> {
     let overlay =
         WebviewWindowBuilder::new(app, "keys-overlay", WebviewUrl::App("index.html".into()))
             .title("KeyPulse Keyshow")
-            .inner_size(KEYSHOW_WIDTH, KEYSHOW_HEIGHT)
+            .inner_size(1080.0, 190.0)
             .decorations(false)
             .transparent(true)
             .always_on_top(true)
@@ -88,24 +205,6 @@ fn build_keyshow_overlay(app: &tauri::App) -> tauri::Result<()> {
             .visible(false)
             .build()?;
     overlay.set_ignore_cursor_events(true)?;
-
-    if let Some(monitor) = overlay.primary_monitor()? {
-        let area = monitor.work_area();
-        let scale = monitor.scale_factor();
-        let width = KEYSHOW_WIDTH * scale;
-        let height = KEYSHOW_HEIGHT * scale;
-        let margin = 24.0 * scale;
-        let x = area.position.x as f64 + ((area.size.width as f64 - width) / 2.0).max(margin);
-        let y = area.position.y as f64
-            + (area.size.height as f64 - height - margin).max(area.position.y as f64);
-        overlay.set_size(Size::Physical(PhysicalSize::new(
-            width as u32,
-            height as u32,
-        )))?;
-        overlay.set_position(Position::Physical(PhysicalPosition::new(
-            x as i32, y as i32,
-        )))?;
-    }
     Ok(())
 }
 
@@ -142,6 +241,8 @@ pub fn run() {
             }
 
             build_keyshow_overlay(app)?;
+            app.manage(KeyshowPrefs::default());
+            apply_keyshow_layout(app.handle()).map_err(std::io::Error::other)?;
             setup_tray(app)?;
             Ok(())
         })
@@ -153,7 +254,9 @@ pub fn run() {
             get_recording,
             get_input_status,
             clear_stats,
-            toggle_keyshow
+            toggle_keyshow,
+            set_keyshow_position,
+            set_keyshow_size
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

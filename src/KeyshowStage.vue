@@ -18,6 +18,15 @@ const MOD_KEYS = new Set([
 type StyleMode = "capsule" | "particle" | "mirror";
 const mode = ref<StyleMode>((localStorage.getItem("keypulse-keyshow-style") as StyleMode) || "capsule");
 const showHint = ref(true);
+// The window is resized by the host (small/medium/large); content scales to match
+// the medium baseline of 1080x190 so visuals stay crisp at every size.
+const contentScale = ref(1);
+const KEYSHOW_BASE_WIDTH = 1080;
+
+function applyContentScale() {
+  const scale = window.innerWidth / KEYSHOW_BASE_WIDTH;
+  contentScale.value = Math.min(Math.max(scale, 0.6), 1.8);
+}
 
 // ---------- shared event sink ----------
 type CapsuleSegment = { label: string; mod: boolean };
@@ -220,6 +229,8 @@ onMounted(async () => {
     if (pollTimer) clearInterval(pollTimer);
   };
   window.addEventListener("storage", onStorage);
+  window.addEventListener("resize", applyContentScale);
+  applyContentScale();
   pollTimer = setInterval(pollSharedPrefs, 300);
 });
 
@@ -231,6 +242,7 @@ let pollTimer: ReturnType<typeof setInterval> | undefined;
 // poll the shared localStorage values and apply changes when they drift.
 function pollSharedPrefs() {
   expireStaleLitKeys();
+  applyContentScale();
   const style = localStorage.getItem("keypulse-keyshow-style") || "capsule";
   if (style !== lastStyle) {
     lastStyle = style;
@@ -257,6 +269,7 @@ function onStorage(event: StorageEvent) {
 onUnmounted(() => {
   stopListener?.();
   stopStorage?.();
+  window.removeEventListener("resize", applyContentScale);
   document.documentElement.classList.remove("keyshow-window");
   if (hideTimer) clearTimeout(hideTimer);
   if (modCommitTimer) clearTimeout(modCommitTimer);
@@ -264,8 +277,9 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="keyshow-root" :data-caps="capsules.length" :data-bursts="bursts.length" :data-mode="mode">
+  <div class="keyshow-root" :data-caps="capsules.length" :data-bursts="bursts.length" :data-mode="mode" :data-scale="contentScale">
     <p v-if="showHint" class="keyshow-hint">按键可视化已开启 — 按下的键会出现在这里 · 可在主界面切换风格</p>
+    <div class="keyshow-content" :style="{ transform: `scale(${contentScale})` }">
 
     <!-- 节奏胶囊流 -->
     <div v-if="mode === 'capsule'" class="capsule-stage" aria-hidden="true">
@@ -300,16 +314,20 @@ onUnmounted(() => {
         <span v-for="chip in recentChips" :key="chip.id" class="mirror-chip">{{ chip.label }}</span>
       </div>
     </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .keyshow-root { position: fixed; inset: 0; display: flex; align-items: end; justify-content: center; overflow: hidden; pointer-events: none; user-select: none; }
+.keyshow-content { flex: 0 0 auto; width: 1080px; height: 190px; display: flex; flex-direction: column; align-items: center; justify-content: end; transform-origin: center bottom; }
 .keyshow-hint { position: absolute; top: 6px; left: 50%; transform: translateX(-50%); padding: 6px 14px; border: 1px solid rgba(148,163,184,.2); border-radius: 999px; color: rgba(148,163,184,.9); background: rgba(4,9,24,.55); font-size: 11px; white-space: nowrap; animation: hint-in .3s ease; }
 @keyframes hint-in { from { opacity: 0; transform: translateX(-50%) translateY(6px); } }
 
 /* ---------- capsule stream ---------- */
-.capsule-stage { display: flex; gap: 10px; align-items: center; justify-content: center; padding-bottom: 14px; }
+.capsule-stage { display: flex; gap: 10px; align-items: center; justify-content: center; padding-bottom: 14px; height: 90px; }
+.particle-stage { position: relative; width: 1080px; height: 150px; }
+.mirror-stage { display: flex; flex-direction: column; align-items: center; gap: 8px; padding-bottom: 10px; }
 .cap-row { display: flex; gap: 5px; align-items: center; }
 .cap { display: inline-grid; place-items: center; min-width: 34px; height: 34px; padding: 0 10px; border-radius: 9px; font-weight: 800; font-size: 16px; letter-spacing: .02em; background: rgba(15, 23, 42, .62); color: #f8fafc; box-shadow: 0 6px 18px rgba(0,0,0,.35), inset 0 0 0 1px rgba(148,163,184,.22); backdrop-filter: blur(2px); }
 .cap.key { color: #fff; box-shadow: 0 6px 20px rgba(0,0,0,.4), inset 0 0 0 1px rgba(var(--cyan-rgb),.55); text-shadow: 0 0 14px rgba(var(--cyan-rgb),.8); }
@@ -328,7 +346,7 @@ onUnmounted(() => {
 
 /* ---------- particle trail ---------- */
 .particle-stage { position: relative; width: 100%; height: 100%; }
-.burst { position: absolute; left: 50%; bottom: 46px; display: flex; align-items: center; justify-content: center; animation: burst-rise .95s ease-out forwards; }
+.burst { position: absolute; left: 50%; bottom: 30px; display: flex; align-items: center; justify-content: center; animation: burst-rise .95s ease-out forwards; }
 .burst-label { font-size: 34px; font-weight: 900; color: var(--text-main); text-shadow: 0 0 22px rgba(var(--cyan-rgb),.95); animation: label-flicker .9s ease-out; }
 .burst.heat-2 .burst-label { color: #ffe9a8; text-shadow: 0 0 26px rgba(var(--amber-rgb),1); }
 .burst.heat-3 .burst-label { color: #ffd0dd; text-shadow: 0 0 30px rgba(var(--pink-rgb),1); }
@@ -343,7 +361,6 @@ onUnmounted(() => {
 @keyframes spark-fly { 0% { transform: translate(-50%, -50%) translate(0, 0) scale(1); opacity: 1; } 100% { transform: translate(-50%, -50%) translate(calc((var(--i) - 3) * 26px), -140px) scale(0); opacity: 0; } }
 
 /* ---------- mirror keyboard ---------- */
-.mirror-stage { display: flex; flex-direction: column; align-items: center; gap: 8px; padding-bottom: 10px; }
 .mirror-board { display: flex; flex-direction: column; gap: 5px; padding: 9px 10px; border-radius: 12px; background: rgba(4, 9, 24, .5); box-shadow: 0 10px 26px rgba(0,0,0,.3), inset 0 0 0 1px rgba(148,163,184,.14); }
 .mirror-row { display: flex; gap: 5px; justify-content: center; }
 .mirror-key { display: grid; place-items: center; width: 38px; height: 30px; border-radius: 6px; color: rgba(226, 232, 240, .45); background: rgba(30, 41, 59, .55); font-size: 11px; font-weight: 700; transition: all .12s ease; box-shadow: inset 0 0 0 1px rgba(148,163,184,.1); }
