@@ -25,3 +25,4 @@ Desktop.ini
 
 # Local logs
 *.log
+server/node_modules/

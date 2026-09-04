@@ -1,4 +1,5 @@
 mod input;
+mod pk;
 mod storage;
 
 use input::{InputListener, InputStatus, RecordingState};
@@ -448,6 +449,32 @@ fn set_data_location(app: tauri::AppHandle, kind: String) -> Result<String, Stri
     Ok(format!("数据位置已切换为：{dir}\\keypulse.sqlite（重启后生效）"))
 }
 
+/// Save a base64 PNG (from the footprint card canvas) under
+/// %USERPROFILE%\Pictures\KeyPulse\ so no extra plugins are required.
+#[tauri::command]
+fn save_footprint_png(app: tauri::AppHandle, data_url: String, file_name: String) -> Result<String, String> {
+    use base64::{engine::general_purpose, Engine as _};
+    let encoded = data_url
+        .strip_prefix("data:image/png;base64,")
+        .ok_or_else(|| "expected a PNG data URL".to_string())?;
+    let bytes = general_purpose::STANDARD
+        .decode(encoded)
+        .map_err(|e| format!("base64 decode failed: {e}"))?;
+    let pictures = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .map_err(|_| "cannot resolve user profile".to_string())?
+        + "\\Pictures\\KeyPulse";
+    std::fs::create_dir_all(&pictures).map_err(|e| e.to_string())?;
+    let safe_name: String = file_name
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .collect();
+    let path = format!("{pictures}\\{safe_name}.png");
+    std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
+    let _ = app.path();
+    Ok(path)
+}
+
 #[tauri::command]
 fn get_data_location(app: tauri::AppHandle) -> Result<String, String> {
     let path = resolve_db_path(&app)?;
@@ -489,6 +516,7 @@ pub fn run() {
             }
 
             app.manage(KeyshowPrefs::default());
+            app.manage(pk::PkState::default());
             build_keyshow_overlay(app)?;
             build_mini_overlay(app)?;
             apply_keyshow_layout(app.handle()).map_err(std::io::Error::other)?;
@@ -511,7 +539,13 @@ pub fn run() {
             set_keyshow_drag_mode,
             toggle_mini,
             set_data_location,
-            get_data_location
+            get_data_location,
+            save_footprint_png,
+            pk::pk_start,
+            pk::pk_challenge,
+            pk::pk_report,
+            pk::pk_stop,
+            pk::pk_peers
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

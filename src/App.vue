@@ -6,6 +6,9 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import KeyshowStage from "./KeyshowStage.vue";
 import MiniStat from "./MiniStat.vue";
+import { configureSound, playKeySound, type SoundVoice } from "./sound";
+import DailyCard from "./DailyCard.vue";
+import PkDuel from "./PkDuel.vue";
 
 let isKeyshowWindow = false;
 let isMiniWindow = false;
@@ -118,6 +121,125 @@ async function toggleMini() {
     miniEnabled.value = await invoke<boolean>("toggle_mini");
   } catch (error) {
     console.info("Could not toggle mini stats window.", error);
+  }
+}
+
+// ---------- fun: sound, achievements, count-up ----------
+const soundVoice = ref<SoundVoice>((localStorage.getItem("keypulse-sound") as SoundVoice) || "off");
+const soundVolume = ref(Number(localStorage.getItem("keypulse-sound-volume")) || 60);
+const achievementsOn = ref(localStorage.getItem("keypulse-achievements") !== "0");
+const toastMsg = ref("");
+const footprintAuto = ref(localStorage.getItem("keypulse-footprint-auto") !== "0");
+const showFootprintCard = ref(false);
+const showPkDuel = ref(false);
+const footprintSnapshot = ref<DashboardData | null>(null);
+
+function toggleFootprintAuto(on: boolean) {
+  footprintAuto.value = on;
+  localStorage.setItem("keypulse-footprint-auto", on ? "1" : "0");
+}
+
+async function openFootprintCard() {
+  try {
+    footprintSnapshot.value = await fetchActiveDashboard();
+    showFootprintCard.value = true;
+  } catch (error) {
+    console.info("Could not build footprint card.", error);
+  }
+}
+
+function markFootprintSeen() {
+  showFootprintCard.value = false;
+  localStorage.setItem("keypulse-footprint-seen", new Date().toISOString().slice(0, 10));
+}
+
+function autoShowFootprintIfNew() {
+  if (!footprintAuto.value || demoMode.value) return;
+  const today = new Date().toISOString().slice(0, 10);
+  const seen = localStorage.getItem("keypulse-footprint-seen") || "";
+  if (seen === today) return;
+  if (liveDashboard.value && liveDashboard.value.totalKeyPresses > 0) {
+    openFootprintCard();
+  }
+}
+let toastTimer: ReturnType<typeof setTimeout> | undefined;
+
+function showToast(message: string) {
+  toastMsg.value = message;
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toastMsg.value = ""; }, 4200);
+}
+
+function setSoundVoice(id: SoundVoice) {
+  soundVoice.value = id;
+  localStorage.setItem("keypulse-sound", id);
+  configureSound(id, soundVolume.value / 100);
+  if (id !== "off") playKeySound(true);
+}
+
+function setSoundVolume(percent: number) {
+  const v = Math.min(Math.max(percent, 0), 100);
+  soundVolume.value = v;
+  localStorage.setItem("keypulse-sound-volume", String(v));
+  configureSound(soundVoice.value, v / 100);
+}
+
+function toggleAchievements(on: boolean) {
+  achievementsOn.value = on;
+  localStorage.setItem("keypulse-achievements", on ? "1" : "0");
+}
+
+const KEY_MILESTONES: Array<[number, string]> = [
+  [50000, "五万键 · 键盘马拉松选手！🏅"],
+  [10000, "一万键 · 今日打字如飞 ✨"],
+  [5000, "五千键 · 手感火热 🔥"],
+  [1000, "一千键 · 今日开始发力 💪"],
+];
+
+function checkAchievements(total: number) {
+  if (!achievementsOn.value) return;
+  const today = new Date().toISOString().slice(0, 10);
+  let done: string[] = [];
+  try { done = JSON.parse(localStorage.getItem("keypulse-achievements-done") || "[]"); } catch { done = []; }
+  for (const [threshold, message] of KEY_MILESTONES) {
+    const key = `${today}:${threshold}`;
+    if (total >= threshold && !done.includes(key)) {
+      done.push(key);
+      showToast(message);
+    }
+  }
+  if (done.length) localStorage.setItem("keypulse-achievements-done", JSON.stringify(done.slice(-40)));
+}
+
+const shownKeys = ref(0);
+const shownMouse = ref(0);
+let countTimer: ReturnType<typeof setInterval> | undefined;
+function tweenTo(target: number, setter: (v: number) => void, current: () => number) {
+  if (countTimer) clearInterval(countTimer);
+  const from = current();
+  const diff = target - from;
+  if (Math.abs(diff) < 2) { setter(target); return; }
+  const started = Date.now();
+  const duration = 360;
+  countTimer = setInterval(() => {
+    const progress = Math.min((Date.now() - started) / duration, 1);
+    const eased = 1 - Math.pow(1 - progress, 3);
+    setter(Math.round(from + diff * eased));
+    if (progress >= 1 && countTimer) { clearInterval(countTimer); countTimer = undefined; }
+  }, 24);
+}
+let stopKeySoundListener: UnlistenFn | undefined;
+async function wireSoundFx() {
+  configureSound(soundVoice.value, soundVolume.value / 100);
+  try {
+    stopKeySoundListener = await listen<{ kind: string; label: string; keyId: string; action: string }>("keyshow-event", (event) => {
+      const payload = event.payload;
+      if (payload.kind !== "key" || payload.action !== "down") return;
+      const heavy = /^(space|enter|backspace|tab)$/.test(payload.keyId);
+      playKeySound(heavy);
+    });
+  } catch {
+    // plain browser preview has no runtime events
   }
 }
 
@@ -249,7 +371,7 @@ function closePopoversOnOutsideClick(event: MouseEvent) {
   const target = event.target as HTMLElement;
   if (showThemePicker.value && !target.closest(".theme-control")) showThemePicker.value = false;
   if (showDatePicker.value && !target.closest(".range-control")) showDatePicker.value = false;
-  if (showSettingsPanel.value && !target.closest(".settings-control") && !target.closest(".keyshow-control")) showSettingsPanel.value = false;
+  if (showSettingsPanel.value && !target.closest(".settings-control") && !target.closest(".settings-button")) showSettingsPanel.value = false;
 }
 const liveDashboard = ref<DashboardData | null>(null);
 const demoMode = ref(true);
@@ -326,6 +448,13 @@ const totalMouseActions = computed(() =>
 );
 const topKeys = computed(() => [...allKeys.value].sort((a, b) => b.count - a.count).slice(0, 4));
 const champion = computed(() => topKeys.value.find((key) => key.count > 0) ?? null);
+watch(totalKeyPresses, (value) => {
+  tweenTo(value, (n) => { shownKeys.value = n; }, () => shownKeys.value);
+  checkAchievements(value);
+});
+watch(totalMouseActions, (value) => {
+  tweenTo(value, (n) => { shownMouse.value = n; }, () => shownMouse.value);
+});
 const maxKeyCount = computed(() => Math.max(1, ...allKeys.value.map((key) => key.count)));
 const hourlyActivity = computed(() => {
   const source = demoMode.value || !liveDashboard.value ? demoHourlyActivity : liveDashboard.value.activity.map((item) => item.count);
@@ -454,6 +583,8 @@ onMounted(async () => {
   if (isMiniWindow) return; // MiniStat owns its lifecycle
   if (!isKeyshowWindow) {
     connectToRuntime();
+    wireSoundFx();
+    setTimeout(autoShowFootprintIfNew, 2600);
     refreshKeyshowState();
     refreshMiniState();
     try {
@@ -489,6 +620,7 @@ onUnmounted(() => {
   stopRecordingListener?.();
   stopKeyshowChangedListener?.();
   stopMiniListener?.();
+  stopKeySoundListener?.();
   document.removeEventListener("click", closePopoversOnOutsideClick);
 });
 </script>
@@ -507,8 +639,8 @@ onUnmounted(() => {
         <div class="demo-chip" :class="{ warning: !demoMode && !inputAvailable }"><i></i> {{ demoMode ? "演示数据" : inputAvailable ? "本地实时数据" : "监听不可用" }}</div>
         <div class="keyshow-control">
           <button class="keyshow-button" :class="{ on: keyshowEnabled }" aria-label="按键可视化开/关" :title="keyshowEnabled ? '按键可视化：开（点击关闭）' : '按键可视化：关（点击开启）'" @click="toggleKeyshow"><i>⌨</i><span class="keyshow-led"></span></button>
-          <button class="settings-button" aria-label="打开设置" @click="openSettings"><i>⚙</i></button>
         </div>
+        <button class="settings-button" aria-label="打开设置" @click="openSettings"><i>⚙</i></button>
         <div class="settings-control">
           <div v-if="showSettingsPanel" class="ks-modal-backdrop" @click.self="showSettingsPanel = false">
             <section class="ks-modal" role="dialog" aria-modal="true" aria-label="设置" tabindex="-1" @keydown.esc="showSettingsPanel = false">
@@ -554,7 +686,29 @@ onUnmounted(() => {
               </div>
               <p class="ks-data-path">当前数据库：<code>{{ dataPath || "加载中…" }}</code></p>
               <p v-if="dataNotice" class="ks-data-notice">{{ dataNotice }}</p>
-              <p class="ks-note">⌨ 显示的是按下动作，不记录文本 · 托盘菜单或顶栏 ⌨ 按钮可随时开/关 · 拖动后选择任意预设位置可恢复对齐</p>
+                            <div class="ks-section-title">趣味功能</div>
+              <div class="ks-layout-row">
+                <div class="ks-layout-col"><div class="ks-layout-title">打字音效</div>
+                  <div class="ks-sound-row">
+                    <select class="ks-select" :value="soundVoice" @change="setSoundVoice(($event.target as HTMLSelectElement).value as SoundVoice)">
+                      <option value="off">关闭</option><option value="click">机械青轴</option><option value="typewriter">打字机</option><option value="bubble">泡泡</option>
+                    </select>
+                    <label class="ks-range compact"><input type="range" min="0" max="100" step="5" :value="soundVolume" :disabled="soundVoice === 'off'" @input="setSoundVolume(Number(($event.target as HTMLInputElement).value))" /><span>{{ soundVolume }}</span></label>
+                  </div>
+                </div>
+                <div class="ks-layout-col"><div class="ks-layout-title">成就提示</div>
+                  <button class="ks-drag-toggle" :class="{ on: achievementsOn }" @click="toggleAchievements(!achievementsOn)"><span class="ks-master-text"><b>{{ achievementsOn ? "已开启" : "已关闭" }}</b><small>当日 1k / 5k / 1w / 5w 键里程碑弹提示</small></span><span class="ks-switch"><i></i></span></button>
+                </div>
+              </div>
+              <div class="ks-layout-row">
+                <div class="ks-layout-col"><div class="ks-layout-title">每日足迹卡</div>
+                  <button class="ks-drag-toggle" :class="{ on: footprintAuto }" @click="toggleFootprintAuto(!footprintAuto)"><span class="ks-master-text"><b>{{ footprintAuto ? "自动提醒已开" : "自动提醒已关" }}</b><small>每天首次打开时弹出当天的足迹卡</small></span><span class="ks-switch"><i></i></span></button>
+                </div>
+                <div class="ks-layout-col"><div class="ks-layout-title"> </div>
+                  <button class="ks-size" style="width:100%; padding:11px 0;" @click="openFootprintCard">✦ 立即查看今日足迹</button>
+                </div>
+              </div>
+<p class="ks-note">⌨ 显示的是按下动作，不记录文本 · 托盘菜单或顶栏 ⌨ 按钮可随时开/关 · 拖动后选择任意预设位置可恢复对齐</p>
             </section>
           </div>
         </div>
@@ -603,8 +757,8 @@ onUnmounted(() => {
     </section>
 
     <section class="stat-grid">
-      <article class="stat-card stat-card-primary"><div class="card-icon icon-spark">✦</div><p>总按键数</p><strong>{{ formatNumber(totalKeyPresses) }}</strong><span class="trend" :class="demoMode ? 'up' : 'neutral'">{{ demoMode ? "↗ 12.8%" : "⌁ 已保存聚合" }} <small>{{ demoMode ? "对比昨日" : activeRangeLabel }}</small></span></article>
-      <article class="stat-card"><div class="card-icon icon-mouse">●</div><p>鼠标操作</p><strong>{{ formatNumber(totalMouseActions) }}</strong><span class="trend" :class="demoMode ? 'up' : 'neutral'">{{ demoMode ? "↗ 8.4%" : "⌁ 已保存聚合" }} <small>{{ demoMode ? "对比昨日" : activeRangeLabel }}</small></span></article>
+      <article class="stat-card stat-card-primary"><div class="card-icon icon-spark">✦</div><p>总按键数</p><strong>{{ formatNumber(shownKeys) }}</strong><span class="trend" :class="demoMode ? 'up' : 'neutral'">{{ demoMode ? "↗ 12.8%" : "⌁ 已保存聚合" }} <small>{{ demoMode ? "对比昨日" : activeRangeLabel }}</small></span></article>
+      <article class="stat-card"><div class="card-icon icon-mouse">●</div><p>鼠标操作</p><strong>{{ formatNumber(shownMouse) }}</strong><span class="trend" :class="demoMode ? 'up' : 'neutral'">{{ demoMode ? "↗ 8.4%" : "⌁ 已保存聚合" }} <small>{{ demoMode ? "对比昨日" : activeRangeLabel }}</small></span></article>
       <article class="stat-card"><div class="card-icon icon-time">◷</div><p>活跃时段</p><strong>{{ activeHours }}<span class="unit">h</span></strong><span class="trend neutral">⌁ 按小时聚合统计</span></article>
       <article class="stat-card highlight-card"><div class="card-icon icon-top">♛</div><p>{{ activeRange === "今天" ? "今日冠军" : "范围冠军" }}</p><strong>{{ champion?.label ?? "暂无" }}</strong><span class="trend accent-text">{{ formatNumber(champion?.count ?? 0) }} 次按下</span></article>
     </section>
@@ -632,8 +786,11 @@ onUnmounted(() => {
       </div>
     </section>
 
-    <section class="panel timeline-panel"><div class="panel-heading compact"><div><p class="eyebrow">ACTIVITY PULSE · {{ activeRangeLabel }}</p><h3>一天中的活跃节奏</h3></div><span class="timeline-note">峰值时段 <b>{{ String(peakHour).padStart(2, "0") }}:00</b></span></div><div class="timeline-chart"><div class="chart-grid-lines"><i></i><i></i><i></i><i></i></div><div v-for="(value, hour) in hourlyActivity" :key="hour" class="chart-column"><div class="chart-bar" :style="{ height: `${value}%` }"><span>{{ value }}</span></div><small v-if="hour % 3 === 0">{{ String(hour).padStart(2, "0") }}:00</small></div></div></section>
-    <footer class="footer-note"><span>KeyPulse · offline by design</span><span>隐私优先 · 只保存聚合统计，不保存输入文本</span><button class="clear-button" :disabled="demoMode" @click="clearStats">清空本地数据</button></footer>
+    <section class="panel timeline-panel"><div class="panel-heading compact"><div><p class="eyebrow">ACTIVITY PULSE · {{ activeRangeLabel }}</p><h3>一天中的活跃节奏</h3></div><span class="timeline-note">峰值时段 <b>{{ String(peakHour).padStart(2, "0") }}:00</b></span></div><div class="timeline-chart"><div class="chart-grid-lines"><i></i><i></i><i></i><i></i></div><div v-for="(value, hour) in hourlyActivity" :key="hour" class="chart-column"><div class="chart-bar" :style="{ height: `${value * 0.84}%` }"><span>{{ value }}</span></div><small v-if="hour % 3 === 0">{{ String(hour).padStart(2, "0") }}:00</small></div></div></section>
+    <PkDuel v-if="showPkDuel" @close="showPkDuel = false" />
+    <DailyCard v-if="showFootprintCard && footprintSnapshot" :snapshot="footprintSnapshot" @close="markFootprintSeen" />
+    <Transition name="toast-pop"><div v-if="toastMsg" class="achievement-toast" role="status"><span>🏆</span><div><b>成就达成</b><small>{{ toastMsg }}</small></div></div></Transition>
+    <footer class="footer-note"><span>KeyPulse · offline by design</span><span>隐私优先 · 只保存聚合统计，不保存输入文本</span><button class="clear-button" :disabled="demoMode" @click="clearStats">清空本地数据</button><button class="footprint-button" @click="openFootprintCard">✦ 足迹卡</button><button class="footprint-button pk-launch" @click="showPkDuel = true">⚔ PK 对战</button></footer>
   </main>
 </template>
 
@@ -758,8 +915,8 @@ html.keyshow-window, html.keyshow-window body { background: transparent !importa
 .ks-modal-close { width: 30px; height: 30px; border: 1px solid rgba(var(--line-rgb),.2); border-radius: 50%; color: var(--tx-soft); background: rgba(var(--line-rgb),.1); cursor: pointer; font-size: 19px; line-height: 1; }
 .ks-modal-close:hover { color: #fff; border-color: rgba(var(--cyan-rgb), .6); }
 .ks-layout-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 4px; }
-.settings-button { display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid rgba(var(--line-rgb),.15); border-radius: 999px; background: rgba(var(--panel-rgb),.55); color: var(--tx-faint); cursor: pointer; font-size: 14px; transition: all .2s ease; }
-.settings-button:hover { border-color: rgba(var(--cyan-rgb),.7); color: #fff; transform: rotate(40deg); }
+.settings-button { display: grid; place-items: center; flex: 0 0 auto; width: 36px; height: 36px; border: 1px solid rgba(var(--line-rgb), .2); border-radius: 999px; background: rgba(var(--panel-rgb), .6); color: var(--tx-faint); cursor: pointer; font-size: 16px; transition: all .25s ease; }
+.settings-button:hover { border-color: rgba(var(--cyan-rgb), .8); color: var(--text-main); transform: rotate(90deg) scale(1.05); box-shadow: 0 0 16px rgba(var(--cyan-rgb), .25); }
 .ks-section-title { margin: 14px 0 8px; padding-top: 2px; color: var(--tx-faint); font-size: 9px; font-weight: 800; letter-spacing: .1em; }
 .settings-themes { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
 .setting-theme { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid rgba(var(--line-rgb),.15); border-radius: 10px; color: var(--tx-soft); background: rgba(var(--ink-rgb),.35); cursor: pointer; font-size: 11px; text-align: left; transition: all .15s ease; }
@@ -783,6 +940,21 @@ html.keyshow-window, html.keyshow-window body { background: transparent !importa
 .ks-data-path { margin: 10px 0 0; color: var(--tx-faint); font-size: 9px; }
 .ks-data-path code { display: inline-block; max-width: 100%; overflow-wrap: anywhere; color: var(--tx-soft); font-family: ui-monospace, Consolas, monospace; font-size: 9px; }
 .ks-data-notice { margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; color: var(--acc-amber); background: rgba(var(--amber-rgb), .08); font-size: 9px; line-height: 1.5; }
+.ks-sound-row { display: flex; flex-direction: column; gap: 6px; }
+.ks-select { width: 100%; padding: 7px 9px; border: 1px solid rgba(var(--line-rgb), .25); border-radius: 9px; color: var(--tx-strong); background: rgba(var(--ink-rgb), .35); font-size: 11px; cursor: pointer; }
+.ks-range.compact { padding: 5px 8px; }
+.achievement-toast { position: fixed; z-index: 40; right: 22px; bottom: 26px; display: flex; align-items: center; gap: 10px; max-width: 320px; padding: 12px 16px; border: 1px solid rgba(var(--amber-rgb), .4); border-radius: 14px; background: rgba(var(--pop-rgb), .92); backdrop-filter: blur(14px); box-shadow: 0 16px 44px rgba(0, 0, 0, .3); }
+.achievement-toast > span { font-size: 20px; }
+.achievement-toast b, .achievement-toast small { display: block; }
+.achievement-toast b { color: var(--text-main); font-size: 12px; }
+.achievement-toast small { margin-top: 3px; color: var(--tx-soft); font-size: 11px; line-height: 1.45; }
+.toast-pop-enter-active { transition: all .35s cubic-bezier(.2, 1.4, .4, 1); }
+.toast-pop-leave-active { transition: all .25s ease; }
+.toast-pop-enter-from, .toast-pop-leave-to { opacity: 0; transform: translateY(16px) scale(.92); }
+.footprint-button { border: 0; padding: 0 10px; color: var(--tx-faint); background: transparent; cursor: pointer; font-size: 10px; }
+.footprint-button:hover { color: var(--acc-pink-soft); }
+.pk-launch:hover { color: var(--acc-cyan-bright); }
+
 
 
 .ks-layout-col .ks-layout-title { margin-top: 0; }
@@ -804,11 +976,13 @@ html.keyshow-window, html.keyshow-window body { background: transparent !importa
 .content-grid { display: grid; grid-template-columns: minmax(0,1.8fr) minmax(300px,.85fr); gap: 15px; margin-bottom: 15px; }.panel { border-radius: 18px; }.keyboard-panel { container-type: inline-size; padding: 27px 28px 20px; overflow: hidden; }.panel-heading { display: flex; align-items: start; justify-content: space-between; gap: 18px; margin-bottom: 28px; }.panel-heading.compact { align-items: center; margin-bottom: 22px; }.panel h3 { margin: 5px 0 0; font-size: 19px; letter-spacing: -.04em; }.legend { gap: 9px; color: var(--tx-faint); font-size: 10px; }.legend-gradient { display: block; width: 75px; height: 6px; border-radius: 99px; background: linear-gradient(90deg,var(--heat-1),var(--heat-2),var(--heat-3),var(--heat-4),var(--heat-5)); }
 .keyboard-wrap { display: flex; flex-direction: column; gap: 1cqw; padding: 2.4cqw 1.9cqw; border-radius: 1.8cqw; background: rgba(var(--ink-rgb),.42); }.keyboard-row { display: flex; gap: .85cqw; min-height: 5.4cqw; }.keycap { display: flex; min-width: 0; flex-direction: column; justify-content: space-between; padding: 1cqw 1cqw .8cqw; border: 1px solid color-mix(in srgb,var(--key-color),white 18%); border-radius: .9cqw; color: #fff; background: linear-gradient(145deg,color-mix(in srgb,var(--key-color),white 9%),var(--key-color)); box-shadow: inset 0 1px rgba(255,255,255,.15),0 5px 10px rgba(0,0,0,.17); transition: transform .18s ease,filter .18s ease; }.keycap:hover { z-index: 2; filter: brightness(1.16); transform: translateY(-4px) scale(1.04); }.keycap span { overflow: hidden; color: rgba(255,255,255,.78); font-size: clamp(6px,1.05cqw,10px); font-weight: 700; text-overflow: ellipsis; }.keycap b { overflow: hidden; font-size: clamp(6px,1.05cqw,10px); font-weight: 700; text-overflow: ellipsis; }.keycap.muted { opacity: .7; }.keycap.warm { box-shadow: inset 0 1px rgba(255,255,255,.17),0 5px 14px color-mix(in srgb,var(--key-color),transparent 65%); }.keycap.hot { box-shadow: inset 0 1px rgba(255,255,255,.2),0 6px 18px color-mix(in srgb,var(--key-color),transparent 53%); }.keyboard-footer { justify-content: space-between; margin-top: 18px; color: var(--tx-faint); font-size: 10px; }.keyboard-footer span { display: flex; align-items: center; gap: 8px; }.live-indicator { width: 5px; height: 5px; }
 .side-column { display: flex; flex-direction: column; gap: 15px; }.mouse-panel, .top-keys-panel { padding: 24px 25px; }.panel-kicker { padding: 5px 8px; border-radius: 6px; color: var(--tx-faint); font-size: 9px; }.mouse-content { gap: 20px; align-items: center; }.mouse-shape { position: relative; flex: 0 0 105px; height: 148px; border: 2px solid rgba(var(--violet-rgb),.58); border-radius: 52px 52px 43px 43px; background: linear-gradient(160deg,rgba(52,217,255,.2),rgba(var(--violet-rgb),.14)); transform: rotate(-3deg); }.mouse-top { position: relative; display: flex; height: 85px; overflow: hidden; border-bottom: 1px solid rgba(var(--violet-rgb),.25); border-radius: 50px 50px 0 0; }.mouse-button { position: relative; flex: 1; padding-top: 25px; color: #fff; text-align: center; font-size: 9px; }.mouse-left { border-right: 1px solid rgba(var(--violet-rgb),.25); background: linear-gradient(135deg,rgba(var(--pink-rgb),.82),rgba(var(--pink-rgb),.12)); }.mouse-right { background: linear-gradient(45deg,rgba(var(--violet-rgb),.1),rgba(var(--violet-rgb),.7)); }.mouse-wheel { position: absolute; top: 15px; left: 50%; width: 13px; height: 25px; border: 1px solid rgba(255,255,255,.55); border-radius: 8px; transform: translateX(-50%); }.mouse-wheel i { display: block; width: 3px; height: 8px; margin: 4px auto; border-radius: 3px; background: var(--acc-cyan); }.mouse-side-buttons { position: absolute; top: 65px; right: -8px; display: flex; flex-direction: column; gap: 5px; }.mouse-side-buttons i { width: 9px; height: 20px; border: 1px solid rgba(var(--green-rgb),.65); border-radius: 4px; background: rgba(var(--green-rgb),.35); }.mouse-stats { flex: 1; display: flex; flex-direction: column; gap: 12px; }.mouse-stat { display: grid; grid-template-columns: 7px 1fr auto; align-items: center; gap: 8px; color: var(--tx-dim); font-size: 10px; }.mouse-stat i { width: 6px; height: 6px; border-radius: 50%; }.mouse-stat b { color: var(--tx-strong); font-size: 11px; }.sparkline { color: var(--acc-pink-bright); font-size: 18px; letter-spacing: -5px; }.top-key-list { display: flex; flex-direction: column; gap: 13px; }.top-key-row { display: grid; grid-template-columns: 23px 48px 1fr 44px; align-items: center; gap: 9px; }.rank { color: var(--tx-mute); font-size: 9px; }.top-key-label { color: var(--tx-strong); font-size: 11px; font-weight: 700; }.mini-bar { height: 5px; overflow: hidden; border-radius: 99px; background: var(--bar-track); }.mini-bar i { display: block; height: 100%; border-radius: inherit; }.top-key-row b { color: var(--tx-soft); text-align: right; font-size: 10px; }
-.timeline-panel { padding: 24px 28px 20px; }.timeline-note { gap: 5px; color: var(--tx-faint); font-size: 10px; }.timeline-note b { color: var(--acc-pink-soft); }.timeline-chart { position: relative; display: flex; align-items: end; gap: 7px; height: 120px; padding: 0 6px; }.chart-grid-lines { position: absolute; inset: 0 6px 20px; display: flex; flex-direction: column; justify-content: space-between; }.chart-grid-lines i { display: block; border-top: 1px dashed rgba(var(--line-rgb),.1); }.chart-column { position: relative; z-index: 1; display: flex; flex: 1; height: 100%; flex-direction: column; align-items: center; justify-content: end; gap: 8px; }.chart-bar { position: relative; width: min(100%,30px); min-height: 5px; border-radius: 6px 6px 2px 2px; background: linear-gradient(180deg,var(--acc-pink-bright),var(--acc-violet) 75%,var(--bar-tip)); opacity: .85; transition: height .25s ease,opacity .2s ease; }.chart-bar:hover { opacity: 1; }.chart-bar span { position: absolute; top: -17px; left: 50%; display: none; color: var(--text-main); font-size: 8px; transform: translateX(-50%); }.chart-bar:hover span { display: block; }.chart-column small { height: 12px; color: var(--tx-mute); font-size: 8px; }.footer-note { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 15px; color: var(--tx-mute); font-size: 10px; }.clear-button { border: 0; padding: 0; color: var(--tx-mute); background: transparent; cursor: pointer; font-size: 10px; }.clear-button:hover:not(:disabled) { color: var(--acc-pink-soft); }.clear-button:disabled { cursor: not-allowed; opacity: .35; }
+.timeline-panel { padding: 24px 28px 20px; }.timeline-note { gap: 5px; color: var(--tx-faint); font-size: 10px; }.timeline-note b { color: var(--acc-pink-soft); }.timeline-chart { position: relative; display: flex; align-items: end; gap: 7px; height: 120px; padding: 0 6px; }.chart-grid-lines { position: absolute; inset: 0 6px 20px; display: flex; flex-direction: column; justify-content: space-between; }.chart-grid-lines i { display: block; border-top: 1px dashed rgba(var(--line-rgb),.1); }.chart-column { position: relative; z-index: 1; display: flex; flex: 1; height: 100%; flex-direction: column; align-items: center; justify-content: flex-end; }.chart-bar { position: relative; width: min(100%,30px); min-height: 5px; margin-bottom: 15px; border-radius: 6px 6px 2px 2px; background: linear-gradient(180deg,var(--acc-pink-bright),var(--acc-violet) 75%,var(--bar-tip)); opacity: .85; transition: height .25s ease,opacity .2s ease; }.chart-bar:hover { opacity: 1; }.chart-bar span { position: absolute; top: -17px; left: 50%; display: none; color: var(--tx-soft); font-size: 8px; transform: translateX(-50%); white-space: nowrap; }.chart-bar:hover span { display: block; }.chart-column small { position: absolute; bottom: 0; left: 0; right: 0; height: 12px; color: var(--tx-mute); font-size: 8px; text-align: center; }.footer-note { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 15px; color: var(--tx-mute); font-size: 10px; }.clear-button { border: 0; padding: 0; color: var(--tx-mute); background: transparent; cursor: pointer; font-size: 10px; }.clear-button:hover:not(:disabled) { color: var(--acc-pink-soft); }.clear-button:disabled { cursor: not-allowed; opacity: .35; }
 /* Stacking fixes: freshly opened layers must paint above the stat cards.
    The hero row owns the date popover, the topbar owns the theme/keyshow popovers,
    so both need a higher z-index than the stat grid below them. */
-.topbar { z-index: 3; }.hero-row { z-index: 2; }.runtime-warning { z-index: 4; }
+.topbar { z-index: 5; }.hero-row { z-index: 2; }.runtime-warning { z-index: 4; }
+.topbar { position: sticky; top: 10px; padding: 9px 16px; border: 1px solid rgba(var(--line-rgb), .14); border-radius: 18px; background: rgba(var(--pop-rgb), .8); backdrop-filter: blur(16px); box-shadow: 0 12px 32px rgba(0, 0, 0, .16); margin-bottom: 26px; }
+html[data-theme="starlight"] .topbar { box-shadow: 0 12px 30px rgba(0, 0, 0, .08); }
 @media (max-width: 1050px) { .content-grid { grid-template-columns: 1fr; }.side-column { display: grid; grid-template-columns: 1fr 1fr; } }
 @media (max-width: 720px) { .app-shell { padding: 22px 15px; }.topbar { align-items: flex-start; margin-bottom: 58px; }.topbar-actions { gap: 7px; }.demo-chip { display: none; }.hero-row { align-items: flex-start; flex-direction: column; }.range-switch { align-self: stretch; justify-content: space-between; }.range-switch button { flex: 1; }.stat-grid { grid-template-columns: 1fr 1fr; }.stat-card { min-height: 145px; padding: 16px; }.stat-card strong { font-size: 22px; }.side-column { display: flex; }.mouse-content { justify-content: center; }.timeline-panel, .keyboard-panel, .mouse-panel, .top-keys-panel { padding-inline: 17px; }.footer-note { flex-direction: column; gap: 7px; } }
 </style>
