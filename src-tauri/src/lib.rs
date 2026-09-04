@@ -1,3 +1,12 @@
+//! KeyPulse application shell: window lifecycle, tray menu, keyshow/mini
+//! overlay windows, data-location preferences and PK profile persistence.
+//!
+//! Module layout:
+//! - `input`    — global keyboard/mouse hooks, repeat/injection filtering, live events
+//! - `storage`  — SQLite aggregation (key/mouse/hour), dashboard queries, clear
+//! - `pk`       — LAN typing-duel transport (UDP discovery + TCP relay)
+//! - this file  — Tauri commands, overlay windows, tray, settings persistence
+
 mod input;
 mod pk;
 mod storage;
@@ -351,9 +360,10 @@ fn build_keyshow_overlay(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Where the SQLite database lives. `appdata` = %APPDATA% (default, works for
-/// installed builds); `appdir` = a writable folder next to the executable
-/// (portable setups that do not want to grow the system drive).
+/// Where the SQLite database lives. `appdir` = a writable `keypulse-data`
+/// folder next to the executable (default, keeps data local and off the
+/// system drive); `appdata` = %APPDATA% fallback for installed builds whose
+/// Program Files folder is read-only.
 fn preferences_path(app: &impl tauri::Manager<tauri::Wry>) -> std::path::PathBuf {
     app.path()
         .app_config_dir()
@@ -370,7 +380,9 @@ fn read_data_location(app: &impl tauri::Manager<tauri::Wry>) -> String {
             }
         }
     }
-    "appdata".into()
+    // Default to the portable location next to the executable; it falls back
+    // to %APPDATA% automatically when that folder is not writable.
+    "appdir".into()
 }
 
 fn write_data_location(app: &impl tauri::Manager<tauri::Wry>, kind: &str) -> Result<(), String> {
@@ -451,6 +463,70 @@ fn set_data_location(app: tauri::AppHandle, kind: String) -> Result<String, Stri
 
 /// Save a base64 PNG (from the footprint card canvas) under
 /// %USERPROFILE%\Pictures\KeyPulse\ so no extra plugins are required.
+/// Local PK profile persisted next to the dataLocation preference.
+#[derive(Clone, serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PkProfile {
+    pub best: u64,
+    pub wins: u64,
+    pub losses: u64,
+    pub games: u64,
+}
+
+/// Read the local PK profile (best score / wins / losses) from preferences.json.
+fn read_pk_profile(app: &impl tauri::Manager<tauri::Wry>) -> PkProfile {
+    let file = preferences_path(app);
+    if let Ok(raw) = std::fs::read_to_string(&file) {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) {
+            if let Some(profile) = value.get("pkProfile") {
+                if let Ok(profile) = serde_json::from_value::<PkProfile>(profile.clone()) {
+                    return profile;
+                }
+            }
+        }
+    }
+    PkProfile::default()
+}
+
+/// Persist the PK profile next to the data-location preference.
+fn write_pk_profile(app: &impl tauri::Manager<tauri::Wry>, profile: &PkProfile) -> Result<(), String> {
+    let file = preferences_path(app);
+    if let Some(parent) = file.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let mut value = if let Ok(raw) = std::fs::read_to_string(&file) {
+        serde_json::from_str::<serde_json::Value>(&raw).unwrap_or_else(|_| serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+    value["pkProfile"] = serde_json::to_value(profile).map_err(|e| e.to_string())?;
+    std::fs::write(&file, serde_json::to_string_pretty(&value).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_pk_profile(app: tauri::AppHandle) -> PkProfile {
+    read_pk_profile(&app)
+}
+
+/// Called once by each side when a duel ends; updates the local leaderboard
+/// profile and returns it so the UI can refresh immediately.
+#[tauri::command]
+fn pk_record_result(app: tauri::AppHandle, win: bool, score: u64) -> Result<PkProfile, String> {
+    let mut profile = read_pk_profile(&app);
+    profile.games += 1;
+    if win {
+        profile.wins += 1;
+    } else {
+        profile.losses += 1;
+    }
+    if score > profile.best {
+        profile.best = score;
+    }
+    write_pk_profile(&app, &profile)?;
+    Ok(profile)
+}
+
 #[tauri::command]
 fn save_footprint_png(app: tauri::AppHandle, data_url: String, file_name: String) -> Result<String, String> {
     use base64::{engine::general_purpose, Engine as _};
@@ -485,10 +561,41 @@ fn get_data_location(app: tauri::AppHandle) -> Result<String, String> {
     ))
 }
 
+/// One-time move of the legacy %APPDATA% store into the portable folder.
+/// Only runs when no explicit dataLocation preference exists yet.
+fn migrate_legacy_store_if_needed(app: &tauri::App) -> Result<(), String> {
+    let prefs_file = preferences_path(app);
+    if prefs_file.exists() {
+        return Ok(());
+    }
+    let resolved = resolve_db_path(app)?;
+    let is_appdir = resolved
+        .parent()
+        .and_then(|d| d.file_name())
+        .map(|n| n == "keypulse-data")
+        .unwrap_or(false);
+    if !is_appdir || resolved.exists() {
+        return Ok(());
+    }
+    let appdata = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let source = appdata.join("keypulse.sqlite");
+    if source.exists() {
+        for suffix in ["", "-wal", "-shm"] {
+            let src = std::path::PathBuf::from(format!("{}{}", source.display(), suffix));
+            if src.exists() {
+                let dst = std::path::PathBuf::from(format!("{}{}", resolved.display(), suffix));
+                std::fs::copy(&src, &dst).map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
+            migrate_legacy_store_if_needed(app).map_err(std::io::Error::other)?;
             let db_path = resolve_db_path(app).map_err(std::io::Error::other)?;
             if let Some(parent) = db_path.parent() {
                 std::fs::create_dir_all(parent)?;
@@ -541,6 +648,8 @@ pub fn run() {
             set_data_location,
             get_data_location,
             save_footprint_png,
+            get_pk_profile,
+            pk_record_result,
             pk::pk_start,
             pk::pk_challenge,
             pk::pk_report,

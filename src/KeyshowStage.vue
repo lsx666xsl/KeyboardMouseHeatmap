@@ -16,7 +16,7 @@ const MOD_KEYS = new Set([
   "shift-left", "shift-right", "win-left", "win-right", "menu",
 ]);
 
-type StyleMode = "capsule" | "particle" | "mirror";
+type StyleMode = "capsule" | "particle" | "mirror" | "ring" | "firework" | "spring";
 const mode = ref<StyleMode>((localStorage.getItem("keypulse-keyshow-style") as StyleMode) || "capsule");
 const showHint = ref(true);
 // The window is resized by the host (small/medium/large); content scales to match
@@ -80,6 +80,46 @@ type Burst = { id: number; label: string; heat: number };
 const bursts = ref<Burst[]>([]);
 let burstSeq = 0;
 const recentHeat = new Map<string, number[]>();
+
+// extra effects: expanding rings, firework pops, springy key bounce
+type Ring = { id: number; label: string };
+const rings = ref<Ring[]>([]);
+let ringSeq = 0;
+type Spark = { angle: number; distance: number };
+type Pop = { id: number; label: string; parts: Spark[] };
+const pops = ref<Pop[]>([]);
+let popSeq = 0;
+const springs = ref<Ring[]>([]);
+let springSeq = 0;
+
+function dropAfter(millis: number, fn: () => void) {
+  setTimeout(fn, millis);
+}
+
+function onRingEvent(event: KeyShowEvent) {
+  if (event.action !== "down") return;
+  const id = ++ringSeq;
+  rings.value = [...rings.value.slice(-2), { id, label: event.label }];
+  dropAfter(950, () => { rings.value = rings.value.filter((r) => r.id !== id); });
+}
+
+function onPopEvent(event: KeyShowEvent) {
+  if (event.action !== "down") return;
+  const id = ++popSeq;
+  const parts: Spark[] = Array.from({ length: 12 }, (_, i) => ({
+    angle: (i / 12) * Math.PI * 2 + Math.random() * 0.6,
+    distance: 70 + Math.random() * 55,
+  }));
+  pops.value = [...pops.value.slice(-2), { id, label: event.label, parts }];
+  dropAfter(850, () => { pops.value = pops.value.filter((pop) => pop.id !== id); });
+}
+
+function onSpringEvent(event: KeyShowEvent) {
+  if (event.action !== "down") return;
+  const id = ++springSeq;
+  springs.value = [...springs.value.slice(-2), { id, label: event.label }];
+  dropAfter(750, () => { springs.value = springs.value.filter((s) => s.id !== id); });
+}
 
 // capsule combo pending modifiers
 const pendingMods: CapsuleSegment[] = [];
@@ -224,6 +264,9 @@ function routeEvent(event: KeyShowEvent) {
   onCapsuleDown(event);
   onCapsuleUp(event);
   onMirrorEvent(event);
+  onRingEvent(event);
+  onPopEvent(event);
+  onSpringEvent(event);
 }
 
 // ---------- mirror keyboard layout ----------
@@ -372,6 +415,24 @@ onUnmounted(() => {
       </div>
     </div>
 
+    <!-- 波纹扩散 -->
+    <div v-if="mode === 'ring'" class="fx-stage" aria-hidden="true">
+      <div v-for="ring in rings" :key="ring.id" class="fx-ring"><span>{{ ring.label }}</span></div>
+    </div>
+
+    <!-- 烟花爆裂 -->
+    <div v-if="mode === 'firework'" class="fx-stage" aria-hidden="true">
+      <div v-for="pop in pops" :key="pop.id" class="fx-pop">
+        <span class="fx-pop-label">{{ pop.label }}</span>
+        <i v-for="(part, index) in pop.parts" :key="index" class="fx-spark" :style="{ '--a': part.angle + 'rad', '--d': part.distance + 'px', '--c': index % 3 }"></i>
+      </div>
+    </div>
+
+    <!-- 弹性蹦跳 -->
+    <div v-if="mode === 'spring'" class="fx-stage" aria-hidden="true">
+      <div v-for="spring in springs" :key="spring.id" class="fx-spring"><span>{{ spring.label }}</span></div>
+    </div>
+
     <!-- 迷你键盘镜像 -->
     <div v-if="mode === 'mirror'" class="mirror-stage" aria-hidden="true">
       <div class="mirror-board">
@@ -433,6 +494,24 @@ onUnmounted(() => {
 @keyframes burst-rise { 0% { transform: translate(-50%, 0) scale(.6); opacity: 0; } 14% { opacity: 1; transform: translate(-50%, -12px) scale(1); } 100% { transform: translate(-50%, -118px) scale(.86); opacity: 0; } }
 @keyframes label-flicker { 0% { opacity: 0; } 12% { opacity: 1; } 70% { opacity: 1; } 100% { opacity: 0; } }
 @keyframes spark-fly { 0% { transform: translate(-50%, -50%) translate(0, 0) scale(1); opacity: 1; } 100% { transform: translate(-50%, -50%) translate(calc((var(--i) - 3) * 26px), -140px) scale(0); opacity: 0; } }
+
+/* ---------- extra effects ---------- */
+.fx-stage { position: relative; width: 1080px; height: 150px; }
+.fx-ring { position: absolute; left: 50%; bottom: 40px; width: 90px; height: 90px; margin-left: -45px; animation: ring-out .95s ease-out forwards; }
+.fx-ring span { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; font-weight: 900; font-size: 20px; text-shadow: 0 0 18px rgba(var(--cyan-rgb), 1); }
+.fx-ring::before, .fx-ring::after { content: ""; position: absolute; inset: 0; border-radius: 50%; border: 2px solid rgba(var(--cyan-rgb), .8); animation: ring-wave .95s ease-out forwards; }
+.fx-ring::after { animation-delay: .18s; }
+@keyframes ring-wave { 0% { transform: scale(.25); opacity: 1; } 100% { transform: scale(2.4); opacity: 0; } }
+@keyframes ring-out { 0% { transform: scale(.6); opacity: 0; } 18% { opacity: 1; transform: scale(1); } 100% { transform: scale(1.25); opacity: 0; } }
+.fx-pop { position: absolute; left: 50%; bottom: 36px; animation: pop-rise .8s ease-out forwards; }
+.fx-pop-label { display: block; margin-bottom: 4px; text-align: center; color: var(--text-main); font-weight: 900; font-size: 22px; text-shadow: 0 0 16px rgba(var(--amber-rgb), .9); }
+.fx-spark { position: absolute; left: 50%; top: 14px; width: 6px; height: 6px; border-radius: 50%; background: var(--acc-pink); box-shadow: 0 0 8px var(--acc-pink); transform: translate(-50%, -50%) rotate(var(--a)) translateX(var(--d)) scale(1); animation: spark-fade .8s ease-out forwards; }
+.fx-spark:nth-child(3n) { background: var(--acc-amber); box-shadow: 0 0 8px var(--acc-amber); }
+.fx-spark:nth-child(3n+1) { background: var(--acc-cyan); box-shadow: 0 0 8px var(--acc-cyan); }
+@keyframes spark-fade { 0% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -50%) rotate(var(--a)) translateX(calc(var(--d) * 1.5)) scale(.2); } }
+@keyframes pop-rise { 0% { transform: translate(-50%, 10px) scale(.5); opacity: 0; } 20% { opacity: 1; transform: translate(-50%, -10px) scale(1.05); } 100% { transform: translate(-50%, -46px) scale(.94); opacity: 0; } }
+.fx-spring { position: absolute; left: 50%; bottom: 34px; display: grid; place-items: center; min-width: 64px; height: 44px; padding: 0 12px; border-radius: 12px; color: #fff; font-weight: 900; font-size: 20px; background: linear-gradient(160deg, rgba(var(--violet-rgb), .85), rgba(var(--cyan-rgb), .75)); box-shadow: 0 8px 24px rgba(var(--cyan-rgb), .35); animation: spring-bounce .75s cubic-bezier(.2, 1.6, .4, 1) forwards; }
+@keyframes spring-bounce { 0% { transform: translate(-50%, 0) scaleY(.6); opacity: 0; } 16% { opacity: 1; transform: translate(-50%, -78px) scaleY(1.05); } 34% { transform: translate(-50%, 0) scaleY(.94); } 52% { transform: translate(-50%, -40px) scaleY(1); } 70% { transform: translate(-50%, 0) scaleY(.97); } 100% { transform: translate(-50%, -8px) scaleY(.9); opacity: 0; } }
 
 /* ---------- mirror keyboard ---------- */
 .mirror-board { display: flex; flex-direction: column; gap: 5px; padding: 9px 10px; border-radius: 12px; background: rgba(4, 9, 24, .5); box-shadow: 0 10px 26px rgba(0,0,0,.3), inset 0 0 0 1px rgba(148,163,184,.14); }

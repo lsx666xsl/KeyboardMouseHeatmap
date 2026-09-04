@@ -29,6 +29,10 @@ pub struct PeerInfo {
     pub name: String,
     pub host: String,
     pub port: u16,
+    pub best: u64,
+    pub wins: u64,
+    pub losses: u64,
+    pub games: u64,
 }
 
 #[derive(Default)]
@@ -44,6 +48,8 @@ fn send_line(stream: &mut TcpStream, text: &str) {
     let _ = stream.flush();
 }
 
+/// Read peer messages (counts/ticks/end) until the socket closes, then
+/// clear the active flag so a new duel can start.
 fn relay_loop(mut reader: BufReader<TcpStream>, app: AppHandle) {
     loop {
         let mut line = String::new();
@@ -82,6 +88,7 @@ fn relay_loop(mut reader: BufReader<TcpStream>, app: AppHandle) {
     app.state::<PkState>().active.store(false, Ordering::SeqCst);
 }
 
+/// The duel clock: emit + relay a tick every second; send `end` at zero.
 fn server_timer(mut writer: TcpStream, app: AppHandle) {
     let started = std::time::Instant::now();
     loop {
@@ -98,7 +105,14 @@ fn server_timer(mut writer: TcpStream, app: AppHandle) {
 }
 
 /// Start advertising + listening. Returns the TCP port others can challenge.
-pub fn start_host(app: &AppHandle, name: String) -> Result<u16, String> {
+pub fn start_host(
+    app: &AppHandle,
+    name: String,
+    best: u64,
+    wins: u64,
+    losses: u64,
+    games: u64,
+) -> Result<u16, String> {
     let state = app.state::<PkState>();
     if state.active.swap(true, Ordering::SeqCst) {
         return Err("PK 已在运行中".into());
@@ -112,8 +126,20 @@ pub fn start_host(app: &AppHandle, name: String) -> Result<u16, String> {
     let adv_app = app.clone();
     let adv_name = name.clone();
     let adv_port = port;
+    let adv_best = best;
+    let adv_wins = wins;
+    let adv_losses = losses;
+    let adv_games = games;
     thread::spawn(move || {
-        let payload = serde_json::json!({ "t": "kp-pk-adv", "name": adv_name, "port": adv_port });
+        let payload = serde_json::json!({
+            "t": "kp-pk-adv",
+            "name": adv_name,
+            "port": adv_port,
+            "best": best,
+            "wins": wins,
+            "losses": losses,
+            "games": games,
+        });
         while adv_app.state::<PkState>().active.load(Ordering::SeqCst) {
             let _ = adv_socket.send_to(
                 payload.to_string().as_bytes(),
@@ -143,6 +169,10 @@ pub fn start_host(app: &AppHandle, name: String) -> Result<u16, String> {
                                     name: pname.to_string(),
                                     host,
                                     port: pport as u16,
+                                    best: msg.get("best").and_then(|v| v.as_u64()).unwrap_or(0),
+                                    wins: msg.get("wins").and_then(|v| v.as_u64()).unwrap_or(0),
+                                    losses: msg.get("losses").and_then(|v| v.as_u64()).unwrap_or(0),
+                                    games: msg.get("games").and_then(|v| v.as_u64()).unwrap_or(0),
                                 });
                             }
                         }
@@ -212,8 +242,15 @@ pub fn start_client(app: &AppHandle, name: String, host: String, port: u16) -> R
 }
 
 #[tauri::command]
-pub fn pk_start(app: AppHandle, name: String) -> Result<u16, String> {
-    start_host(&app, name)
+pub fn pk_start(
+    app: AppHandle,
+    name: String,
+    best: u64,
+    wins: u64,
+    losses: u64,
+    games: u64,
+) -> Result<u16, String> {
+    start_host(&app, name, best, wins, losses, games)
 }
 
 #[tauri::command]

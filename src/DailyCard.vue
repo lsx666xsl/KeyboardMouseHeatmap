@@ -166,8 +166,8 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.foot-backdrop { position: fixed; z-index: 30; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(4, 9, 24, .6); backdrop-filter: blur(8px); }
-.foot-modal { width: min(100%, 940px); max-height: calc(100vh - 48px); overflow: auto; padding: 22px; border: 1px solid rgba(var(--cyan-rgb), .25); border-radius: 20px; background: linear-gradient(145deg, rgba(var(--panel-rgb), .98), rgba(var(--pop-rgb), .98)); box-shadow: 0 28px 80px rgba(0, 0, 0, .45); }
+.foot-backdrop { position: fixed; z-index: 30; inset: 0; display: grid; place-items: start center; padding: max(24px, 8vh) 24px 24px; background: rgba(4, 9, 24, .6); backdrop-filter: blur(8px); }
+.foot-modal { width: min(100%, 940px); max-height: calc(100vh - max(28px, 8vh) - 50px); overflow: auto; padding: 22px; border: 1px solid rgba(var(--cyan-rgb), .25); border-radius: 20px; background: linear-gradient(145deg, rgba(var(--panel-rgb), .98), rgba(var(--pop-rgb), .98)); box-shadow: 0 28px 80px rgba(0, 0, 0, .45); }
 .foot-head { display: flex; align-items: start; justify-content: space-between; gap: 14px; margin-bottom: 14px; }
 .foot-modal h3 { margin: 4px 0 0; font-size: 20px; letter-spacing: -.04em; }
 .foot-close { width: 30px; height: 30px; border: 1px solid rgba(var(--line-rgb), .25); border-radius: 50%; color: var(--tx-soft); background: rgba(var(--line-rgb), .1); cursor: pointer; font-size: 19px; line-height: 1; }
