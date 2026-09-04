@@ -292,18 +292,52 @@ const mirrorMain: MirrorKey[][] = [
     K("Space", "space", 6.5), K("Alt", "alt-right", 1.3), K("Fn", "fn", 1.1, true),
     K("≣", "menu"), K("Ctrl", "ctrl-right", 1.5)],
 ];
-const mirrorSide: { title: string; keys: MirrorKey[] }[] = [
-  { title: "编辑", keys: [K("Ins", "insert"), K("Home", "home"), K("PgUp", "page-up")] },
-  { title: "", keys: [K("Del", "delete"), K("End", "end"), K("PgDn", "page-down")] },
-  { title: "方向", keys: [K("↑", "arrow-up"), K("←", "arrow-left"), K("↓", "arrow-down"), K("→", "arrow-right")] },
-  { title: "数字", keys: [
-    K("Num", "num-lock", 1, true), K("÷", "numpad-divide", 1, true), K("×", "numpad-multiply", 1, true), K("−", "numpad-subtract", 1, true),
-    K("7", "numpad-7"), K("8", "numpad-8"), K("9", "numpad-9"), K("+", "numpad-add", 1, true),
-    K("4", "numpad-4"), K("5", "numpad-5"), K("6", "numpad-6"), K("", "numpad-6", 0, true),
-    K("1", "numpad-1"), K("2", "numpad-2"), K("3", "numpad-3"), K("", "", 0, true),
-    K("0", "numpad-0", 1), K(".", "numpad-decimal"), K("↵", "numpad-enter", 2, true),
-  ] },
+// Right zone of the standard 104 layout, aligned row by row with the main
+// keyboard: edit keys sit beside rows 1-2, the direction pad beside rows 4-5
+// and the numeric keypad occupies rows 1-5 (num-lock next to the number row).
+// Each entry: [zone, rowIndex(0..5), keys...] with optional {tall} marker on the
+// last key of a numpad row to emulate the spanning "+"/Enter keys.
+type MirrorRow = {
+  zone: "edit" | "dir" | "num";
+  row: number;
+  keys: MirrorKey[];
+  span?: "plus" | "enter"; // tall keys that visually span two rows
+};
+const mirrorSideRows: MirrorRow[] = [
+  { zone: "edit", row: 1, keys: [K("Ins", "insert"), K("Home", "home"), K("PgUp", "page-up")] },
+  { zone: "edit", row: 2, keys: [K("Del", "delete"), K("End", "end"), K("PgDn", "page-down")] },
+  { zone: "dir", row: 3, keys: [K("↑", "arrow-up")] },
+  { zone: "dir", row: 4, keys: [K("←", "arrow-left"), K("↓", "arrow-down"), K("→", "arrow-right")] },
+  { zone: "num", row: 1, keys: [K("Num", "num-lock", 1, true), K("/", "numpad-divide", 1, true), K("*", "numpad-multiply", 1, true), K("-", "numpad-subtract", 1, true)] },
+  { zone: "num", row: 2, keys: [K("7", "numpad-7"), K("8", "numpad-8"), K("9", "numpad-9"), K("+", "numpad-add", 1, true)], span: "plus" },
+  { zone: "num", row: 3, keys: [K("4", "numpad-4"), K("5", "numpad-5"), K("6", "numpad-6")] },
+  { zone: "num", row: 4, keys: [K("1", "numpad-1"), K("2", "numpad-2"), K("3", "numpad-3"), K("↵", "numpad-enter", 1, true)], span: "enter" },
+  { zone: "num", row: 5, keys: [K("0", "numpad-0", 2), K(".", "numpad-decimal")] },
 ];
+
+const mirrorRightColumns = [
+  { zone: "edit", cells: flattenSide(mirrorSideRows.filter((r) => r.zone === "edit")) },
+  { zone: "dir", cells: flattenSide(mirrorSideRows.filter((r) => r.zone === "dir")) },
+  { zone: "num", cells: flattenSide(mirrorSideRows.filter((r) => r.zone === "num")) },
+];
+
+function sideGridRow(cell: { row: number; tall: boolean }) {
+  return String(cell.row + 1) + " / span " + (cell.tall ? 2 : 1);
+}
+
+function flattenSide(rows: MirrorRow[]) {
+  return rows.flatMap((row) => {
+    const tallLast = row.span === "plus" || row.span === "enter";
+    const keys = row.keys.map((key, index) => ({
+      key: key.keyId,
+      label: key.label,
+      w: key.w,
+      row: row.row,
+      tall: !!tallLast && index === row.keys.length - 1,
+    }));
+    return keys;
+  });
+}
 
 function isKeyLit(keyId: string) {
   const pressedAt = litKeys.value[keyId];
@@ -464,10 +498,9 @@ onUnmounted(() => {
           </div>
         </div>
         <div class="mirror-side">
-          <div v-for="(group, groupIndex) in mirrorSide" :key="groupIndex" class="mirror-group">
-            <small>{{ group.title }}</small>
-            <div class="mirror-row">
-              <div v-for="key in group.keys" :key="key.keyId || groupIndex + key.label" class="mirror-key side" :class="{ lit: isKeyLit(key.keyId), wide: key.w, blank: !key.keyId }">{{ key.label }}</div>
+          <div v-for="col in mirrorRightColumns" :key="col.zone" class="mirror-right-col" :class="col.zone">
+              <div v-for="cell in col.cells" :key="cell.key" class="mirror-cell" :class="{ tall: cell.tall }" :style="{ gridRow: sideGridRow(cell) }">
+              <div class="mirror-key side" :class="{ lit: isKeyLit(cell.key), wide: cell.w }">{{ cell.label }}</div>
             </div>
           </div>
         </div>
@@ -548,9 +581,14 @@ onUnmounted(() => {
 /* ---------- mirror keyboard ---------- */
 .mirror-board { display: flex; gap: 7px; padding: 8px 9px; border-radius: 12px; background: rgba(4, 9, 24, .5); box-shadow: 0 10px 26px rgba(0,0,0,.3), inset 0 0 0 1px rgba(148,163,184,.14); }
 .mirror-main { display: flex; flex-direction: column; gap: 4px; }
-.mirror-side { display: flex; flex-direction: column; justify-content: space-between; gap: 4px; border-left: 1px solid rgba(148,163,184,.14); padding-left: 7px; }
-.mirror-group small { display: block; margin: 0 0 3px; color: var(--tx-faint); font-size: 7px; text-align: center; letter-spacing: .08em; }
-.mirror-group > .mirror-row { flex-wrap: wrap; justify-content: center; }
+.mirror-side { display: flex; gap: 6px; border-left: 1px solid rgba(148,163,184,.14); padding-left: 6px; }
+.mirror-right-col { display: grid; grid-template-rows: repeat(6, 19px); gap: 4px; align-content: start; }
+.mirror-right-col.num { grid-template-columns: repeat(4, 24px); }
+.mirror-right-col.edit { grid-template-columns: repeat(3, 24px); }
+.mirror-right-col.dir { grid-template-columns: repeat(3, 24px); grid-template-rows: repeat(6, 19px); }
+.mirror-cell { display: contents; }
+.mirror-key.side { width: auto; }
+.mirror-right-col .mirror-key.side { height: 19px; grid-row: auto; }
 .mirror-row { display: flex; gap: 3px; justify-content: center; }
 .mirror-key { display: grid; place-items: center; width: 25px; height: 19px; border-radius: 4px; color: rgba(226, 232, 240, .5); background: rgba(30, 41, 59, .6); font-size: 7.5px; font-weight: 700; transition: all .12s ease; box-shadow: inset 0 0 0 1px rgba(148,163,184,.1); }
 .mirror-key.wide { width: auto; flex: 1 1 auto; }

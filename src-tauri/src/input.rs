@@ -469,6 +469,9 @@ mod windows_listener {
             0x26 => ("arrow-up", "↑"),
             0x27 => ("arrow-right", "→"),
             0x28 => ("arrow-down", "↓"),
+            0x14 => ("caps-lock", "Caps"),
+            0x13 => ("pause", "Pause"),
+            0x2C => ("print-screen", "PrtSc"),
             0x2D => ("insert", "Insert"),
             0x2E => ("delete", "Delete"),
             0x30..=0x39 => {
@@ -485,6 +488,21 @@ mod windows_listener {
                 let label = format!("F{}", vk - 0x6F);
                 return Some((label.to_lowercase(), label));
             }
+            0x60 => ("numpad-0", "小键盘0"),
+            0x61 => ("numpad-1", "小键盘1"),
+            0x62 => ("numpad-2", "小键盘2"),
+            0x63 => ("numpad-3", "小键盘3"),
+            0x64 => ("numpad-4", "小键盘4"),
+            0x65 => ("numpad-5", "小键盘5"),
+            0x66 => ("numpad-6", "小键盘6"),
+            0x67 => ("numpad-7", "小键盘7"),
+            0x68 => ("numpad-8", "小键盘8"),
+            0x69 => ("numpad-9", "小键盘9"),
+            0x6A => ("numpad-multiply", "小键盘*"),
+            0x6B => ("numpad-add", "小键盘+"),
+            0x6D => ("numpad-subtract", "小键盘-"),
+            0x6E => ("numpad-decimal", "小键盘."),
+            0x6F => ("numpad-divide", "小键盘/"),
             0x90 => ("num-lock", "NumLock"),
             0x91 => ("scroll-lock", "ScrollLock"),
             0xBA => ("semicolon", ";"),
