@@ -35,3 +35,4 @@
 - 2026-09-04-keyshow-overlay.zip — 实时按键可视化浮层（commit b9d6bb9）
 - 2026-09-04-keyshow-layout.zip — 按键浮层位置/大小自定义（含本阶段全部）
 - 2026-09-04-settings-hub.zip — 设置中心/透明度/拖动/迷你窗/六主题/数据迁移/新图标（commit 66d2a60）
+- 2026-09-04-fun-pack.zip — 趣味功能包：音效/成就/足迹卡/局域网PK/云端中继参考（commit 2d8da79，推送待网络恢复）
