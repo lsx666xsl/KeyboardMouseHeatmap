@@ -1,0 +1,16 @@
+{
+  "name": "server",
+  "version": "1.0.0",
+  "description": "`pk-cloud-server.js` 是一个无状态 WebSocket 中继：同一房间两名玩家互相转发按键计数， 服务端负责 60 秒倒计时。没有账号、不存数据，重启即清零。",
+  "main": "pk-cloud-server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "ws": "^8.21.3"
+  }
+}
