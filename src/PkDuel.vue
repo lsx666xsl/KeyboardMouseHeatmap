@@ -4,7 +4,11 @@ import { onMounted, onUnmounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
-type Peer = { name: string; host: string; port: number };
+type Peer = {
+  name: string; host: string; port: number; best?: number; wins?: number; losses?: number; games?: number;
+  totalKeys?: number; todayKeys?: number; activeDays?: number; streak?: number;
+};
+type BoardRow = { name: string; isMe: boolean; totalKeys: number; todayKeys: number; activeDays: number; streak: number };
 type Phase = "idle" | "hosting" | "playing" | "result";
 
 const emit = defineEmits<{ (e: "close"): void }>();
@@ -18,6 +22,47 @@ const secondsLeft = ref(0);
 const myRole = ref("");
 const message = ref("");
 const dueling = ref(false);
+const lanBoard = ref<BoardRow[]>([]);
+const lanBoardSort = ref("total");
+const boardSorts = [
+  { id: "total", name: "总按键" },
+  { id: "today", name: "今日" },
+  { id: "days", name: "活跃" },
+  { id: "streak", name: "连击" },
+];
+
+async function refreshLanBoard() {
+  const me = await localStats();
+  const profile = await currentProfile();
+  const rows: BoardRow[] = [
+    {
+      name: profile?.name || playerName.value || "我",
+      isMe: true,
+      totalKeys: me?.totalKeys || 0,
+      todayKeys: me?.todayKeys || 0,
+      activeDays: me?.activeDays || 0,
+      streak: me?.streak || 0,
+    },
+    ...peers.value.map((peer) => ({
+      name: peer.name,
+      isMe: false,
+      totalKeys: peer.totalKeys || 0,
+      todayKeys: peer.todayKeys || 0,
+      activeDays: peer.activeDays || 0,
+      streak: peer.streak || 0,
+    })),
+  ];
+  rows.sort((a, b) => {
+    const key = lanBoardSort.value === "today" ? "todayKeys" : lanBoardSort.value === "days" ? "activeDays" : lanBoardSort.value === "streak" ? "streak" : "totalKeys";
+    return (b[key] as number) - (a[key] as number);
+  });
+  lanBoard.value = rows;
+}
+
+function switchLanSort(sortId: string) {
+  lanBoardSort.value = sortId;
+  refreshLanBoard();
+}
 
 let pkLocal = 0;
 let reportTimer: ReturnType<typeof setInterval> | undefined;
@@ -30,6 +75,7 @@ async function refreshPeers() {
   } catch {
     peers.value = [];
   }
+  refreshLanBoard();
 }
 
 type ProfileLike = { id: string; name: string; color: string; best: number; wins: number; losses: number; games: number };
@@ -42,17 +88,31 @@ async function currentProfile(): Promise<ProfileLike | null> {
   }
 }
 
+type LocalStats = { totalKeys: number; totalMouse: number; activeDays: number; streak: number; todayKeys: number };
+
+async function localStats(): Promise<LocalStats | null> {
+  try {
+    return await invoke<LocalStats>("get_local_stats");
+  } catch {
+    return null;
+  }
+}
+
 async function startHosting() {
   if (!playerName.value.trim()) playerName.value = "玩家" + Math.floor(Math.random() * 900 + 100);
   localStorage.setItem("keypulse-pk-name", playerName.value);
   try {
-    const profile = await currentProfile();
+    const [profile, stats] = await Promise.all([currentProfile(), localStats()]);
     await invoke("pk_start", {
       name: profile?.name || playerName.value,
       best: profile?.best || 0,
       wins: profile?.wins || 0,
       losses: profile?.losses || 0,
       games: profile?.games || 0,
+      totalKeys: stats?.totalKeys || 0,
+      todayKeys: stats?.todayKeys || 0,
+      activeDays: stats?.activeDays || 0,
+      streak: stats?.streak || 0,
     });
     phase.value = "hosting";
     message.value = "等待对手挑战…（保持打开，同网段其他 KeyPulse 会看到你）";
@@ -137,6 +197,7 @@ async function refreshMyRecord() {
 onMounted(async () => {
   refreshPeers();
   refreshMyRecord();
+  refreshLanBoard();
   try {
     stopPk = await listen<any>("pk-event", (event) => {
       const payload = event.payload as Record<string, unknown>;
@@ -201,6 +262,16 @@ const isWinner = () => myScore.value > peerScore.value;
           <button class="pk-ghost" @click="refreshPeers">↻ 刷新对手</button>
         </div>
         <div v-if="message" class="pk-msg">{{ message }}</div>
+        <div class="pk-lan">
+          <div class="pk-lan-head"><span>局域网数据排行</span><span class="pk-lan-sorts"><button v-for="opt in boardSorts" :key="opt.id" :class="{ active: lanBoardSort === opt.id }" @click="switchLanSort(opt.id)">{{ opt.name }}</button></span></div>
+          <div v-if="lanBoard.length === 0" class="pk-lan-empty">暂无数据</div>
+          <div v-for="(row, index) in lanBoard" :key="row.name" class="pk-lan-row" :class="{ me: row.isMe }">
+            <span class="pk-rank">{{ index + 1 }}</span>
+            <span class="pk-lan-name">{{ row.name }}{{ row.isMe ? "（我）" : "" }}</span>
+            <span class="pk-lan-val">{{ row.totalKeys.toLocaleString() }} 键</span>
+            <span class="pk-lan-sub">{{ lanBoardSort === "today" ? "今日 " + row.todayKeys.toLocaleString() + " 键" : lanBoardSort === "days" ? "活跃 " + row.activeDays + " 天" : lanBoardSort === "streak" ? "连击 " + row.streak + " 天" : "鼠标 " }}</span>
+          </div>
+        </div>
         <div class="pk-peers">
           <div v-if="!peers.length" class="pk-empty">暂未发现对手 — 让对方也打开 PK 对战，并保持在同一网络</div>
           <div v-for="peer in peers" :key="peer.host + ':' + peer.port" class="pk-peer">
@@ -250,6 +321,19 @@ const isWinner = () => myScore.value > peerScore.value;
 .pk-msg { margin: 4px 0 10px; color: var(--acc-amber); font-size: 11px; }
 .pk-peers { display: grid; gap: 6px; margin-top: 6px; }
 .pk-empty { padding: 14px; border: 1px dashed rgba(var(--line-rgb), .25); border-radius: 12px; color: var(--tx-faint); font-size: 11px; text-align: center; line-height: 1.6; }
+.pk-lan { margin: 12px 0 4px; }
+.pk-lan-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 5px; color: var(--tx-faint); font-size: 9px; font-weight: 800; letter-spacing: .08em; }
+.pk-lan-sorts { display: flex; gap: 4px; }
+.pk-lan-sorts button { padding: 3px 7px; border: 1px solid rgba(var(--line-rgb), .2); border-radius: 7px; color: var(--tx-faint); background: transparent; cursor: pointer; font-size: 8px; }
+.pk-lan-sorts button.active { color: #fff; border-color: rgba(var(--cyan-rgb), .55); background: rgba(var(--cyan-rgb), .14); }
+.pk-lan-empty { padding: 8px; color: var(--tx-faint); font-size: 9px; text-align: center; }
+.pk-lan-row { display: grid; grid-template-columns: 22px 1fr auto auto; gap: 7px; align-items: center; padding: 4px 8px; border-radius: 8px; font-size: 10px; color: var(--tx-soft); }
+.pk-lan-row.me { background: rgba(var(--cyan-rgb), .1); }
+.pk-rank { color: var(--tx-faint); font-weight: 900; }
+.pk-lan-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tx-strong); font-weight: 700; }
+.pk-lan-val { font-variant-numeric: tabular-nums; }
+.pk-lan-sub { color: var(--tx-faint); font-size: 8px; }
+
 .pk-peer { display: flex; align-items: center; gap: 8px; padding: 9px 11px; border: 1px solid rgba(var(--line-rgb), .16); border-radius: 11px; background: rgba(var(--ink-rgb), .25); }
 .pk-peer-name { font-weight: 800; color: var(--tx-strong); font-size: 12px; }
 .pk-peer-addr { color: var(--tx-faint); font-size: 9px; }

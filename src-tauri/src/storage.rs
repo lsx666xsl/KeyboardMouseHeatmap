@@ -20,6 +20,16 @@ pub struct MouseStat {
     pub count: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileStats {
+    pub total_keys: u64,
+    pub total_mouse: u64,
+    pub active_days: u32,
+    pub streak: u32,
+    pub today_keys: u64,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivityStat {
@@ -273,10 +283,64 @@ impl StatsStore {
     }
 
     pub fn clear(&self) -> Result<(), String> {
+
+    /// Input profile used by the LAN leaderboard: totals, active days and the
+    /// current day-streak derived from stored daily aggregates.
+
         let connection = self.connection.lock().map_err(|error| error.to_string())?;
         connection
             .execute_batch("DELETE FROM key_stats; DELETE FROM mouse_stats;")
             .map_err(|error| error.to_string())
+    }
+
+    pub fn input_profile_stats(&self) -> Result<ProfileStats, String> {
+        let connection = self.connection.lock().map_err(|error| error.to_string())?;
+        let mut daily: std::collections::BTreeMap<String, (u64, u64)> = Default::default();
+        {
+            let mut query = connection
+                .prepare("SELECT stat_date, SUM(press_count) FROM key_stats GROUP BY stat_date")
+                .map_err(|e| e.to_string())?;
+            let rows = query
+                .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))
+                .map_err(|e| e.to_string())?;
+            for row in rows {
+                let (date, keys) = row.map_err(|e| e.to_string())?;
+                daily.entry(date).or_insert((0, 0)).0 += keys.max(0) as u64;
+            }
+        }
+        {
+            let mut query = connection
+                .prepare("SELECT stat_date, SUM(action_count) FROM mouse_stats GROUP BY stat_date")
+                .map_err(|e| e.to_string())?;
+            let rows = query
+                .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))
+                .map_err(|e| e.to_string())?;
+            for row in rows {
+                let (date, mouse) = row.map_err(|e| e.to_string())?;
+                daily.entry(date).or_insert((0, 0)).1 += mouse.max(0) as u64;
+            }
+        }
+        let total_keys = daily.values().map(|d| d.0).sum();
+        let total_mouse = daily.values().map(|d| d.1).sum();
+        let active_days = daily.len() as u32;
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let today_keys = daily.get(&today).map(|d| d.0).unwrap_or(0);
+        let mut streak = 0u32;
+        let mut cursor = chrono::Local::now().date_naive();
+        if !daily.contains_key(&cursor.format("%Y-%m-%d").to_string()) {
+            cursor -= chrono::Duration::days(1);
+        }
+        while daily.contains_key(&cursor.format("%Y-%m-%d").to_string()) {
+            streak += 1;
+            cursor -= chrono::Duration::days(1);
+        }
+        Ok(ProfileStats {
+            total_keys,
+            total_mouse,
+            active_days,
+            streak,
+            today_keys,
+        })
     }
 }
 

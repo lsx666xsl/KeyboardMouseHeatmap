@@ -33,6 +33,10 @@ pub struct PeerInfo {
     pub wins: u64,
     pub losses: u64,
     pub games: u64,
+    pub total_keys: u64,
+    pub today_keys: u64,
+    pub active_days: u32,
+    pub streak: u32,
 }
 
 #[derive(Default)]
@@ -105,6 +109,7 @@ fn server_timer(mut writer: TcpStream, app: AppHandle) {
 }
 
 /// Start advertising + listening. Returns the TCP port others can challenge.
+#[allow(clippy::too_many_arguments)]
 pub fn start_host(
     app: &AppHandle,
     name: String,
@@ -112,6 +117,10 @@ pub fn start_host(
     wins: u64,
     losses: u64,
     games: u64,
+    total_keys: u64,
+    today_keys: u64,
+    active_days: u32,
+    streak: u32,
 ) -> Result<u16, String> {
     let state = app.state::<PkState>();
     if state.active.swap(true, Ordering::SeqCst) {
@@ -130,15 +139,23 @@ pub fn start_host(
     let adv_wins = wins;
     let adv_losses = losses;
     let adv_games = games;
+    let adv_total_keys = total_keys;
+    let adv_today_keys = today_keys;
+    let adv_active_days = active_days;
+    let adv_streak = streak;
     thread::spawn(move || {
         let payload = serde_json::json!({
             "t": "kp-pk-adv",
             "name": adv_name,
             "port": adv_port,
-            "best": best,
-            "wins": wins,
-            "losses": losses,
-            "games": games,
+            "best": adv_best,
+            "wins": adv_wins,
+            "losses": adv_losses,
+            "games": adv_games,
+            "totalKeys": adv_total_keys,
+            "todayKeys": adv_today_keys,
+            "activeDays": adv_active_days,
+            "streak": adv_streak,
         });
         while adv_app.state::<PkState>().active.load(Ordering::SeqCst) {
             let _ = adv_socket.send_to(
@@ -173,6 +190,10 @@ pub fn start_host(
                                     wins: msg.get("wins").and_then(|v| v.as_u64()).unwrap_or(0),
                                     losses: msg.get("losses").and_then(|v| v.as_u64()).unwrap_or(0),
                                     games: msg.get("games").and_then(|v| v.as_u64()).unwrap_or(0),
+                                    total_keys: msg.get("totalKeys").and_then(|v| v.as_u64()).unwrap_or(0),
+                                    today_keys: msg.get("todayKeys").and_then(|v| v.as_u64()).unwrap_or(0),
+                                    active_days: msg.get("activeDays").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                                    streak: msg.get("streak").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
                                 });
                             }
                         }
@@ -242,6 +263,7 @@ pub fn start_client(app: &AppHandle, name: String, host: String, port: u16) -> R
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn pk_start(
     app: AppHandle,
     name: String,
@@ -249,8 +271,12 @@ pub fn pk_start(
     wins: u64,
     losses: u64,
     games: u64,
+    total_keys: u64,
+    today_keys: u64,
+    active_days: u32,
+    streak: u32,
 ) -> Result<u16, String> {
-    start_host(&app, name, best, wins, losses, games)
+    start_host(&app, name, best, wins, losses, games, total_keys, today_keys, active_days, streak)
 }
 
 #[tauri::command]

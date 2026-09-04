@@ -632,6 +632,11 @@ fn read_custom_sound_base64(file_name: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn get_local_stats(store: State<'_, Arc<StatsStore>>) -> Result<storage::ProfileStats, String> {
+    store.input_profile_stats()
+}
+
+#[tauri::command]
 fn get_pk_profile(app: tauri::AppHandle) -> PlayerProfile {
     let state = load_profiles(&app);
     current_profile(&state)
@@ -1050,6 +1055,7 @@ pub fn run() {
             get_data_location,
             save_footprint_png,
             get_pk_profile,
+            get_local_stats,
             pk_record_result,
             custom_sounds_dir,
             list_custom_sounds,
