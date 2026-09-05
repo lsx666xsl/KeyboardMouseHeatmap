@@ -26,3 +26,7 @@ Desktop.ini
 # Local logs
 *.log
 server/node_modules/
+
+# 本地私有数据（不上传）
+codex交流记录.md
+server/users.json
