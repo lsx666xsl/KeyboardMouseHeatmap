@@ -24,6 +24,19 @@ const formPass = ref("");
 const notice = ref("");
 const busy = ref(false);
 
+type BoardRow = { name: string; totalKeys: number; activeDays: number; streak: number; todayKeys: number };
+const board = ref<BoardRow[]>([]);
+
+async function refreshBoard() {
+  if (!cloudToken.value) { board.value = []; return; }
+  try {
+    const res = await api("/api/leaderboard?sort=total");
+    if (res.ok) board.value = res.list;
+  } catch {
+    // server offline
+  }
+}
+
 const lanDevices = ref<LanDevice[]>([]);
 const scanning = ref(false);
 const lanNotice = ref("");
@@ -64,6 +77,7 @@ async function submitAuth() {
       window.dispatchEvent(new Event("kp-cloud-changed"));
       notice.value = mode.value === "register" ? "注册成功，已接入云端" : "已连接云端";
       formPass.value = "";
+      refreshBoard();
     } else {
       notice.value = res.error || "请求失败";
     }
@@ -114,6 +128,7 @@ function onKeydown(event: KeyboardEvent) {
 
 onMounted(() => {
   refreshProfile();
+  refreshBoard();
   document.addEventListener("keydown", onKeydown);
 });
 onUnmounted(() => document.removeEventListener("keydown", onKeydown));
@@ -170,6 +185,14 @@ onUnmounted(() => document.removeEventListener("keydown", onKeydown));
               <div><b>{{ cloudName }}</b><small v-if="profile">累计 {{ profile.totalKeys.toLocaleString() }} 键 · 活跃 {{ profile.activeDays }} 天 · 连击 {{ profile.streak }} 天</small><small v-else>云端数据加载中…</small></div>
             </div>
             <button class="portal-submit ghost" @click="logout">断开连接</button>
+            <div v-if="board.length" class="portal-board">
+              <small>云端输入排行 · 按累计按键</small>
+              <div v-for="(row, index) in board.slice(0, 8)" :key="row.name" class="portal-board-row" :class="{ me: row.name === cloudName }">
+                <span class="portal-rank">{{ index + 1 }}</span>
+                <span class="portal-board-name">{{ row.name }}{{ row.name === cloudName ? "（我）" : "" }}</span>
+                <span class="portal-board-keys">{{ row.totalKeys.toLocaleString() }} 键</span>
+              </div>
+            </div>
           </template>
           <p v-if="notice" class="portal-notice">{{ notice }}</p>
         </div>
@@ -245,6 +268,13 @@ onUnmounted(() => document.removeEventListener("keydown", onKeydown));
 .portal-device b { color: var(--tx-strong); font-size: 11px; }
 .portal-device small { color: var(--tx-faint); }
 .portal-device-keys { font-variant-numeric: tabular-nums; color: var(--tx-dim); }
+.portal-board { margin-top: 4px; }
+.portal-board small { display: block; margin-bottom: 5px; color: var(--tx-faint); font-size: 8px; font-weight: 800; letter-spacing: .1em; }
+.portal-board-row { display: grid; grid-template-columns: 20px 1fr auto; gap: 7px; align-items: center; padding: 4px 8px; border-radius: 8px; color: var(--tx-soft); font-size: 10px; }
+.portal-board-row.me { background: rgba(var(--cyan-rgb), .12); }
+.portal-rank { color: var(--tx-faint); font-weight: 900; }
+.portal-board-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tx-strong); font-weight: 700; }
+.portal-board-keys { font-variant-numeric: tabular-nums; color: var(--tx-dim); }
 @media (max-width: 720px) {
   .portal-card { grid-template-columns: 1fr; }
   .portal-brand { border-right: none; border-bottom: 1px solid rgba(var(--line-rgb), .16); padding: 22px 20px 16px; }
