@@ -306,7 +306,7 @@ const mirrorLeftKeys: MirrorCell[] = [
   { id: "delete", label: "Del", row: 3, col: 1 },
   { id: "end", label: "End", row: 3, col: 2 },
   { id: "page-down", label: "PgDn", row: 3, col: 3 },
-  { id: "arrow-up", label: "↑", row: 5, col: 2, rowspan: 2 },
+  { id: "arrow-up", label: "↑", row: 5, col: 2 },
   { id: "arrow-left", label: "←", row: 6, col: 1 },
   { id: "arrow-down", label: "↓", row: 6, col: 2 },
   { id: "arrow-right", label: "→", row: 6, col: 3 },
@@ -588,7 +588,7 @@ onUnmounted(() => {
   100% { transform: translateY(0) scale(1); filter: brightness(1); }
 }
 .mirror-side { display: flex; gap: 6px; align-items: start; border-left: 1px solid rgba(148,163,184,.14); padding-left: 6px; }
-.mirror-right-block { display: grid; grid-template-rows: repeat(6, 19px); grid-template-columns: repeat(3, 24px); gap: 4px; }
+.mirror-right-block { display: grid; grid-template-rows: repeat(6, 19px); grid-template-columns: repeat(3, 24px); gap: 5px; }
 .mirror-right-block.num { grid-template-columns: repeat(4, 25px); }
 .mirror-chips { display: flex; gap: 4px; max-width: 90%; overflow: hidden; }
 .mirror-chip { padding: 2px 7px; border-radius: 5px; color: #dbe4f3; background: rgba(15, 23, 42, .66); font-size: 10px; font-weight: 700; white-space: nowrap; animation: chip-in .16s ease; }

@@ -10,6 +10,7 @@ import { configureSound, loadCustomSound, playKeySound, playMetronomeTick, type 
 import DailyCard from "./DailyCard.vue";
 import PkDuel from "./PkDuel.vue";
 import CloudAccount from "./CloudAccount.vue";
+import LoginPortal from "./LoginPortal.vue";
 
 // ============================================================
 // KeyPulse main dashboard window.
@@ -166,6 +167,21 @@ const toastMsg = ref("");
 const footprintAuto = ref(localStorage.getItem("keypulse-footprint-auto") !== "0");
 const showFootprintCard = ref(false);
 const showPkDuel = ref(false);
+const showLoginPortal = ref(false);
+const cloudRefreshKey = ref(0);
+const settingsTab = ref("account");
+const settingsTabs = [
+  { id: "account", name: "档案与账号", icon: "UIStoryboardSegue" },
+];
+// fix icon glyphs below (JS emoji fallback kept simple)
+settingsTabs[0].icon = "◲";
+settingsTabs.push(
+  { id: "theme", name: "外观主题", icon: "◐" },
+  { id: "keyshow", name: "按键特效", icon: "⌨" },
+  { id: "widgets", name: "桌面组件", icon: "▣" },
+  { id: "system", name: "系统与数据", icon: "⚙" },
+  { id: "fun", name: "趣味功能", icon: "✦" },
+);
 type PlayerProfile = {
   id: string; name: string; color: string; best: number; wins: number; losses: number; games: number;
 };
@@ -542,6 +558,7 @@ function openSettings() {
   refreshBehavior();
   refreshProfiles();
   refreshCustomSounds();
+  settingsTab.value = "account";
   showSettingsPanel.value = true;
 }
 
@@ -667,7 +684,7 @@ const leftSideKeys: SideKeySpec[] = [
   { id: "delete", label: "Del", row: 3, col: 1 },
   { id: "end", label: "End", row: 3, col: 2 },
   { id: "page-down", label: "PgDn", row: 3, col: 3 },
-  { id: "arrow-up", label: "↑", row: 5, col: 2, rowspan: 2 },
+  { id: "arrow-up", label: "↑", row: 5, col: 2 },
   { id: "arrow-left", label: "←", row: 6, col: 1 },
   { id: "arrow-down", label: "↓", row: 6, col: 2 },
   { id: "arrow-right", label: "→", row: 6, col: 3 },
@@ -975,6 +992,12 @@ onUnmounted(() => {
           <div v-if="showSettingsPanel" class="ks-modal-backdrop" @click.self="showSettingsPanel = false">
             <section class="ks-modal" role="dialog" aria-modal="true" aria-label="设置" tabindex="-1" @keydown.esc="showSettingsPanel = false">
               <div class="ks-modal-head"><div><p class="eyebrow accent">SETTINGS</p><h3>设置</h3></div><button class="ks-modal-close" aria-label="关闭设置" @click="showSettingsPanel = false">×</button></div>
+              <div class="ks-body">
+                <nav class="ks-nav" aria-label="设置分类">
+                  <button v-for="tab in settingsTabs" :key="tab.id" :class="{ active: settingsTab === tab.id }" @click="settingsTab = tab.id"><i>{{ tab.icon }}</i><span>{{ tab.name }}</span></button>
+                </nav>
+                <div class="ks-panes">
+              <section v-show="settingsTab === 'account'" class="ks-pane">
               <div class="ks-section-title">我的档案</div>
               <div v-if="activeProfile" class="profile-current">
                 <i class="profile-avatar" :style="{ background: activeProfile.color }"></i>
@@ -997,11 +1020,17 @@ onUnmounted(() => {
                 <input v-model="newProfileName" maxlength="16" placeholder="新档案昵称…" @keydown.enter="createProfile" />
                 <button class="profile-action add" @click="createProfile">＋ 新建档案</button>
               </div>
-              <CloudAccount />
+              <button class="portal-open" @click="showLoginPortal = true"><i>⚡</i><span><b>登录 / 连接服务器</b><small>云端账号 · 局域网发现 · 数据排行</small></span><em>›</em></button>
+              <LoginPortal v-if="showLoginPortal" @close="showLoginPortal = false; cloudRefreshKey++" @open-pk="showLoginPortal = false; cloudRefreshKey++; showPkDuel = true" />
+              <CloudAccount :key="cloudRefreshKey" />
+              </section>
+              <section v-show="settingsTab === 'theme'" class="ks-pane">
               <div class="ks-section-title">主题配色</div>
               <div class="settings-themes" role="radiogroup" aria-label="主题配色">
                 <button v-for="option in themeOptions" :key="option.id" role="radio" :aria-checked="themeId === option.id" :class="{ active: themeId === option.id }" class="setting-theme" @click="applyTheme(option.id)"><span class="theme-dots"><i v-for="(dot, dotIndex) in option.dots" :key="dotIndex" :style="{ background: dot }"></i></span>{{ option.name }}</button>
               </div>
+              </section>
+              <section v-show="settingsTab === 'keyshow'" class="ks-pane">
               <div class="ks-section-title">按键可视化</div>
               <button class="keyshow-master" :class="{ on: keyshowEnabled }" @click="toggleKeyshow"><span class="ks-master-text"><b>{{ keyshowEnabled ? "正在显示按键" : "已关闭" }}</b><small>{{ keyshowEnabled ? "按下的键实时显示在屏幕" : "开启后按键会实时显示在屏幕" }}</small></span><span class="ks-switch"><i></i></span></button>
               <div class="ks-layout-title">显示风格</div>
@@ -1030,8 +1059,13 @@ onUnmounted(() => {
                   <button class="ks-drag-toggle" :class="{ on: keyshowDrag }" @click="toggleKeyshowDrag(!keyshowDrag)"><span class="ks-master-text"><b>{{ keyshowDrag ? "拖动中 · 手柄已出现" : "已锁定" }}</b><small>{{ keyshowDrag ? "拖到想要的位置后回来点一下锁定" : "开启后浮层出现手柄，可拖到任意位置" }}</small></span><span class="ks-switch"><i></i></span></button>
                 </div>
               </div>
+<p class="ks-note">⌨ 显示的是按下动作，不记录文本 · 托盘菜单或顶栏 ⌨ 按钮可随时开/关 · 拖动后选择任意预设位置可恢复对齐</p>
+              </section>
+              <section v-show="settingsTab === 'widgets'" class="ks-pane">
               <div class="ks-section-title">迷你统计窗</div>
               <button class="keyshow-master" :class="{ on: miniEnabled }" @click="toggleMini"><span class="ks-master-text"><b>{{ miniEnabled ? "迷你窗已显示" : "迷你窗已隐藏" }}</b><small>{{ miniEnabled ? "右上角小卡片实时显示今日总量与冠军键" : "开启后在桌面右上角显示实时统计小卡片" }}</small></span><span class="ks-switch"><i></i></span></button>
+              </section>
+              <section v-show="settingsTab === 'system'" class="ks-pane">
               <div class="ks-section-title">启动与关闭</div>
               <div class="ks-behavior-row">
                 <button class="ks-drag-toggle" :class="{ on: autostartOn }" @click="toggleAutostart(!autostartOn)"><span class="ks-master-text"><b>{{ autostartOn ? "开机自启动已开" : "开机自启动已关" }}</b><small>{{ autostartOn ? "登录 Windows 后自动在后台运行" : "开机时不会自动启动" }}</small></span><span class="ks-switch"><i></i></span></button>
@@ -1055,6 +1089,8 @@ onUnmounted(() => {
               </div>
               <p class="ks-data-path">当前数据库：<code>{{ dataPath || "加载中…" }}</code></p>
               <p v-if="dataNotice" class="ks-data-notice">{{ dataNotice }}</p>
+              </section>
+              <section v-show="settingsTab === 'fun'" class="ks-pane">
                             <div class="ks-section-title">趣味功能</div>
               <div class="ks-layout-row">
                 <div class="ks-layout-col"><div class="ks-layout-title">打字音效</div>
@@ -1093,7 +1129,9 @@ onUnmounted(() => {
                   <label class="ks-range compact"><input type="range" min="40" max="220" step="2" :value="bpm" @input="changeBpm(Number(($event.target as HTMLInputElement).value))" /><span>{{ bpm }} BPM</span></label>
                 </div>
               </div>
-<p class="ks-note">⌨ 显示的是按下动作，不记录文本 · 托盘菜单或顶栏 ⌨ 按钮可随时开/关 · 拖动后选择任意预设位置可恢复对齐</p>
+              </section>
+                </div>
+              </div>
             </section>
           </div>
         </div>
@@ -1496,8 +1534,26 @@ html.keyshow-window, html.keyshow-window body { background: transparent !importa
 .eyebrow { margin: 0; color: var(--tx-faint); font-size: 10px; font-weight: 800; letter-spacing: .18em; line-height: 1.3; }.eyebrow.accent { color: var(--acc-pink-soft); } h1, h2, h3, p { margin-top: 0; } h1 { margin-bottom: 0; font-size: 19px; line-height: 1; letter-spacing: -.04em; } h1 span { color: var(--acc-pink-bright); }.topbar-actions { gap: 12px; }
 .demo-chip, .record-button, .avatar-button, .range-switch, .panel-kicker { border: 1px solid rgba(var(--line-rgb),.15); background: rgba(var(--panel-rgb),.55); }.demo-chip { display: flex; align-items: center; gap: 8px; padding: 9px 13px; border-radius: 999px; color: var(--tx-soft); font-size: 11px; }.demo-chip i, .live-indicator { width: 7px; height: 7px; border-radius: 50%; background: var(--acc-green); box-shadow: 0 0 0 4px rgba(var(--green-rgb),.11), 0 0 14px var(--acc-green); }.demo-chip.warning { color: var(--acc-amber); border-color: rgba(var(--amber-rgb),.3); }.demo-chip.warning i { background: var(--acc-amber); box-shadow: 0 0 0 4px rgba(var(--amber-rgb),.12), 0 0 14px var(--acc-amber); }.record-button { display: flex; align-items: center; gap: 8px; padding: 9px 13px; border-radius: 999px; color: var(--tx-strong); cursor: pointer; font-size: 11px; transition: .2s ease; }.record-button:hover:not(:disabled) { border-color: rgba(var(--cyan-rgb),.7); transform: translateY(-1px); }.record-button.paused { color: var(--tx-soft); }.record-button:disabled { cursor: not-allowed; opacity: .55; }.record-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--acc-pink); box-shadow: 0 0 12px var(--acc-pink); }.paused .record-dot { background: #64748b; box-shadow: none; }.avatar-button { width: 34px; height: 34px; border-radius: 50%; color: #fff; font-size: 10px; font-weight: 800; cursor: pointer; background: linear-gradient(135deg, var(--acc-cyan), var(--acc-violet)); } .theme-control { position: relative; }.theme-button { display: flex; align-items: center; gap: 4px; height: 34px; padding: 0 11px; border: 1px solid rgba(var(--line-rgb),.15); border-radius: 999px; background: rgba(var(--panel-rgb),.55); cursor: pointer; }.theme-button .theme-dot { display: block; width: 7px; height: 7px; border-radius: 50%; }.theme-button:hover { border-color: rgba(var(--cyan-rgb),.7); transform: translateY(-1px); }.theme-popover { position: absolute; z-index: 8; top: calc(100% + 10px); right: 0; width: 190px; padding: 15px; border: 1px solid rgba(var(--cyan-rgb),.22); border-radius: 14px; background: rgba(var(--pop-rgb),.98); box-shadow: 0 18px 42px rgba(0,0,0,.35); }.theme-popover-title { margin: 0 0 11px; color: var(--text-main); font-size: 12px; font-weight: 800; }.theme-option { display: flex; align-items: center; gap: 10px; width: 100%; margin-top: 4px; padding: 8px 9px; border: 1px solid transparent; border-radius: 9px; color: var(--tx-soft); background: transparent; cursor: pointer; font-size: 11px; text-align: left; transition: .15s ease; }.theme-option:hover { color: #fff; background: rgba(var(--line-rgb),.08); }.theme-option.active { color: #fff; border-color: rgba(var(--cyan-rgb),.45); background: rgba(var(--cyan-rgb),.1); }.theme-dots { display: flex; align-items: center; gap: 3px; }.theme-dots i { width: 8px; height: 8px; border-radius: 50%; display: block; } .keyshow-control { position: relative; }.keyshow-button { display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 10px; border: 1px solid rgba(var(--line-rgb),.15); border-radius: 999px; background: rgba(var(--panel-rgb),.55); cursor: pointer; color: var(--tx-faint); transition: border-color .2s ease, color .2s ease; }.keyshow-button i { font-style: normal; font-size: 14px; }.keyshow-button:hover { border-color: rgba(var(--cyan-rgb),.7); color: #fff; }.keyshow-button.on { border-color: rgba(var(--green-rgb),.65); color: var(--text-main); box-shadow: 0 0 14px rgba(var(--green-rgb),.25); }.keyshow-led { width: 6px; height: 6px; border-radius: 50%; background: #64748b; }.keyshow-button.on .keyshow-led { background: var(--acc-green); box-shadow: 0 0 8px var(--acc-green); }.keyshow-popover { position: absolute; z-index: 8; top: calc(100% + 10px); right: 0; width: 236px; padding: 15px; border: 1px solid rgba(var(--cyan-rgb),.22); border-radius: 14px; background: rgba(var(--pop-rgb),.98); box-shadow: 0 18px 42px rgba(0,0,0,.35); }.keyshow-popover-title { margin: 0 0 11px; color: var(--text-main); font-size: 12px; font-weight: 800; }.keyshow-master { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; padding: 10px 11px; border: 1px solid rgba(var(--line-rgb),.16); border-radius: 11px; color: var(--tx-soft); background: rgba(var(--ink-rgb),.4); cursor: pointer; text-align: left; }.keyshow-master.on { border-color: rgba(var(--green-rgb),.55); background: rgba(var(--green-rgb),.08); }.ks-master-text b, .ks-master-text small { display: block; }.ks-master-text b { color: var(--tx-strong); font-size: 12px; }.keyshow-master.on .ks-master-text b { color: var(--acc-green); }.ks-master-text small { margin-top: 3px; color: var(--tx-faint); font-size: 9px; }.ks-switch { position: relative; flex: 0 0 34px; height: 18px; border-radius: 99px; background: #263452; transition: background .2s ease; }.ks-switch i { position: absolute; top: 3px; left: 3px; width: 12px; height: 12px; border-radius: 50%; background: #94a3b8; transition: all .2s ease; }.keyshow-master.on .ks-switch { background: rgba(var(--green-rgb),.5); }.keyshow-master.on .ks-switch i { left: 19px; background: var(--acc-green); box-shadow: 0 0 8px var(--acc-green); }.ks-styles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 4px; }.ks-style { display: flex; flex-direction: column; align-items: center; gap: 5px; width: 100%; padding: 9px 6px; border: 1px solid rgba(var(--line-rgb),.14); border-radius: 11px; color: var(--tx-soft); background: rgba(var(--ink-rgb),.28); cursor: pointer; text-align: center; transition: all .15s ease; }.ks-style:active { transform: scale(.96); }.ks-style:hover { border-color: rgba(var(--cyan-rgb),.5); background: rgba(var(--ink-rgb),.45); }.ks-style.active { border-color: rgba(var(--cyan-rgb),.6); background: rgba(var(--cyan-rgb),.12); box-shadow: 0 0 12px rgba(var(--cyan-rgb),.12); }.ks-style-icon { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; color: var(--text-main); background: linear-gradient(135deg, rgba(var(--cyan-rgb),.4), rgba(var(--violet-rgb),.4)); font-style: normal; font-size: 15px; }.ks-style-text b, .ks-style-text small { display: block; }.ks-style-text b { color: var(--tx-strong); font-size: 10px; }.ks-style-text small { margin-top: 2px; color: var(--tx-faint); font-size: 8px; line-height: 1.4; }.ks-style.active .ks-style-text b { color: var(--text-main); }.ks-note { margin: 11px 0 0; padding-top: 10px; border-top: 1px dashed rgba(var(--line-rgb),.16); color: var(--tx-faint); font-size: 9px; line-height: 1.55; }
 .ks-modal-backdrop { position: fixed; z-index: 30; inset: 0; display: grid; place-items: start center; padding: max(24px, 8vh) 22px 22px; background: rgba(var(--veil-rgb),.55); backdrop-filter: blur(6px); }
-.ks-modal { width: min(100%, 460px); max-height: calc(100vh - max(28px, 8vh) - 46px); overflow: auto; padding: 24px; border: 1px solid rgba(var(--cyan-rgb), .22); border-radius: 20px; background: linear-gradient(145deg, rgba(var(--panel-rgb), .98), rgba(var(--pop-rgb), .98)); box-shadow: 0 24px 70px rgba(0, 0, 0, .4); }
+.ks-modal { width: min(100%, 660px); max-height: calc(100vh - max(28px, 8vh) - 46px); overflow: auto; padding: 24px; border: 1px solid rgba(var(--cyan-rgb), .22); border-radius: 20px; background: linear-gradient(145deg, rgba(var(--panel-rgb), .98), rgba(var(--pop-rgb), .98)); box-shadow: 0 24px 70px rgba(0, 0, 0, .4); }
 .ks-modal-head { display: flex; align-items: start; justify-content: space-between; gap: 14px; margin-bottom: 16px; }
+.ks-body { display: grid; grid-template-columns: 138px 1fr; gap: 16px; align-items: start; }
+.ks-nav { position: sticky; top: 0; display: grid; gap: 4px; padding-right: 10px; border-right: 1px solid rgba(var(--line-rgb), .16); }
+.ks-nav button { position: relative; display: flex; align-items: center; gap: 7px; padding: 8px 9px; border: 1px solid transparent; border-radius: 10px; color: var(--tx-faint); background: transparent; cursor: pointer; font-size: 10px; font-weight: 700; text-align: left; transition: all .16s ease; }
+.ks-nav button i { font-style: normal; font-size: 12px; width: 14px; text-align: center; }
+.ks-nav button:hover { color: var(--tx-strong); background: rgba(var(--line-rgb), .07); }
+.ks-nav button.active { color: var(--text-main); border-color: rgba(var(--cyan-rgb), .35); background: rgba(var(--cyan-rgb), .09); }
+.ks-nav button.active::before { content: ""; position: absolute; left: -11px; top: 20%; bottom: 20%; width: 3px; border-radius: 2px; background: linear-gradient(180deg, var(--acc-cyan), var(--acc-violet)); box-shadow: 0 0 8px rgba(var(--cyan-rgb), .6); }
+.ks-panes { min-width: 0; max-height: min(560px, calc(100vh - max(28px, 8vh) - 140px)); overflow: auto; padding-right: 4px; }
+.ks-pane > .ks-section-title:first-child { margin-top: 0; padding-top: 0; border-top: none; }
+.portal-open { display: flex; align-items: center; gap: 10px; width: 100%; margin-bottom: 10px; padding: 11px 13px; border: 1px solid rgba(var(--cyan-rgb), .4); border-radius: 13px; color: var(--tx-strong); background: linear-gradient(135deg, rgba(var(--cyan-rgb), .12), rgba(var(--violet-rgb), .12)); cursor: pointer; text-align: left; transition: all .18s ease; }
+.portal-open:hover { border-color: rgba(var(--cyan-rgb), .75); box-shadow: 0 0 22px rgba(var(--cyan-rgb), .16); transform: translateY(-1px); }
+.portal-open i { font-style: normal; font-size: 16px; color: var(--acc-cyan-bright); }
+.portal-open span { flex: 1; }
+.portal-open b, .portal-open small { display: block; }
+.portal-open b { font-size: 12px; }
+.portal-open small { margin-top: 2px; color: var(--tx-faint); font-size: 9px; }
+.portal-open em { color: var(--tx-faint); font-style: normal; font-size: 16px; }
+
 .ks-modal h3 { margin: 4px 0 0; font-size: 20px; letter-spacing: -.04em; }
 .ks-modal-close { width: 30px; height: 30px; border: 1px solid rgba(var(--line-rgb),.2); border-radius: 50%; color: var(--tx-soft); background: rgba(var(--line-rgb),.1); cursor: pointer; font-size: 19px; line-height: 1; }
 .ks-modal-close:hover { color: #fff; border-color: rgba(var(--cyan-rgb), .6); }
@@ -1600,8 +1656,8 @@ html[data-theme="starlight"] .ks-radio.active, html[data-theme="latte"] .ks-radi
 .keyboard-wrap { display: flex; gap: 1.2cqw; padding: 1.6cqw 1.4cqw; border-radius: 1.4cqw; background: rgba(var(--ink-rgb),.42); }.kb-main { display: flex; flex-direction: column; gap: .9cqw; flex: 1 1 auto; min-width: 0; }.keyboard-row { display: flex; gap: .7cqw; min-height: 5.1cqw; }.keycap { display: flex; min-width: 0; flex-direction: column; justify-content: space-between; padding: .9cqw .8cqw .7cqw; border: 1px solid color-mix(in srgb,var(--key-color),white 18%); border-radius: .8cqw; color: #fff; background: linear-gradient(145deg,color-mix(in srgb,var(--key-color),white 9%),var(--key-color)); box-shadow: inset 0 1px rgba(255,255,255,.15),0 5px 10px rgba(0,0,0,.17); transition: transform .18s ease,filter .18s ease; }.keycap:hover { z-index: 2; filter: brightness(1.16); transform: translateY(-4px) scale(1.04); }.keycap span { overflow: hidden; white-space: nowrap; color: rgba(255,255,255,.78); font-size: clamp(5px,.92cqw,9.5px); font-weight: 700; text-overflow: clip; letter-spacing: -.01em; }.keycap b { overflow: hidden; white-space: nowrap; font-size: clamp(5px,.92cqw,9.5px); font-weight: 700; text-overflow: clip; font-variant-numeric: tabular-nums; }.keycap.muted { opacity: .7; }.keycap.blank { opacity: 0; border-color: transparent; box-shadow: none; }
 /* function row keys carry 3-char labels (F10-F12): keep them fully readable */
 .keyboard-row:first-child .keycap span { font-size: clamp(4.5px,.78cqw,8.5px); letter-spacing: -.03em; }.keycap.side { padding: .5cqw .4cqw; border-radius: .6cqw; min-width: 0; }.keycap.side span { font-size: clamp(5.5px,.95cqw,9px); }.keycap.side b { font-size: clamp(5px,.9cqw,8.5px); }.kb-side { display: flex; gap: 1cqw; flex: 0 0 auto; align-items: start; }
-.kb-right-block { display: grid; grid-template-rows: repeat(6, 5.1cqw); grid-template-columns: repeat(3, minmax(3.2cqw, auto)); gap: .9cqw; }
-.kb-right-block.num { grid-template-columns: repeat(4, minmax(3.4cqw, auto)); }
+.kb-right-block { display: grid; grid-template-rows: repeat(6, 5.1cqw); grid-template-columns: repeat(3, minmax(3.2cqw, auto)); gap: 1.15cqw; }
+.kb-right-block.num { grid-template-columns: repeat(4, minmax(3.4cqw, auto)); }.keycap.side { border-radius: .45cqw; }
 .keycap.warm { box-shadow: inset 0 1px rgba(255,255,255,.17),0 5px 14px color-mix(in srgb,var(--key-color),transparent 65%); }.keycap.hot { box-shadow: inset 0 1px rgba(255,255,255,.2),0 6px 18px color-mix(in srgb,var(--key-color),transparent 53%); }.keyboard-footer { justify-content: space-between; margin-top: 18px; color: var(--tx-faint); font-size: 10px; }.keyboard-footer span { display: flex; align-items: center; gap: 8px; }.live-indicator { width: 5px; height: 5px; }
 .side-column { display: flex; flex-direction: column; gap: 15px; }.mouse-panel, .top-keys-panel { padding: 24px 25px; }.panel-kicker { padding: 5px 8px; border-radius: 6px; color: var(--tx-faint); font-size: 9px; }.mouse-content { gap: 20px; align-items: center; }.mouse-shape { position: relative; flex: 0 0 105px; height: 148px; border: 2px solid rgba(var(--violet-rgb),.58); border-radius: 52px 52px 43px 43px; background: linear-gradient(160deg,rgba(52,217,255,.2),rgba(var(--violet-rgb),.14)); transform: rotate(-3deg); }.mouse-top { position: relative; display: flex; height: 85px; overflow: hidden; border-bottom: 1px solid rgba(var(--violet-rgb),.25); border-radius: 50px 50px 0 0; }.mouse-button { position: relative; flex: 1; padding-top: 25px; color: #fff; text-align: center; font-size: 9px; }.mouse-left { border-right: 1px solid rgba(var(--violet-rgb),.25); background: linear-gradient(135deg,rgba(var(--pink-rgb),.82),rgba(var(--pink-rgb),.12)); }.mouse-right { background: linear-gradient(45deg,rgba(var(--violet-rgb),.1),rgba(var(--violet-rgb),.7)); }.mouse-wheel { position: absolute; top: 15px; left: 50%; width: 13px; height: 25px; border: 1px solid rgba(255,255,255,.55); border-radius: 8px; transform: translateX(-50%); }.mouse-wheel i { display: block; width: 3px; height: 8px; margin: 4px auto; border-radius: 3px; background: var(--acc-cyan); }.mouse-side-buttons { position: absolute; top: 65px; right: -8px; display: flex; flex-direction: column; gap: 5px; }.mouse-side-buttons i { width: 9px; height: 20px; border: 1px solid rgba(var(--green-rgb),.65); border-radius: 4px; background: rgba(var(--green-rgb),.35); }.mouse-stats { flex: 1; display: flex; flex-direction: column; gap: 12px; }.mouse-stat { display: grid; grid-template-columns: 7px 1fr auto; align-items: center; gap: 8px; color: var(--tx-dim); font-size: 10px; }.mouse-stat i { width: 6px; height: 6px; border-radius: 50%; }.mouse-stat b { color: var(--tx-strong); font-size: 11px; }.sparkline { color: var(--acc-pink-bright); font-size: 18px; letter-spacing: -5px; }.top-key-list { display: flex; flex-direction: column; gap: 13px; }.top-key-row { display: grid; grid-template-columns: 23px 48px 1fr 44px; align-items: center; gap: 9px; }.rank { color: var(--tx-mute); font-size: 9px; }.top-key-label { color: var(--tx-strong); font-size: 11px; font-weight: 700; }.mini-bar { height: 5px; overflow: hidden; border-radius: 99px; background: var(--bar-track); }.mini-bar i { display: block; height: 100%; border-radius: inherit; }.top-key-row b { color: var(--tx-soft); text-align: right; font-size: 10px; }
 .timeline-panel { padding: 24px 28px 20px; }.timeline-note { gap: 5px; color: var(--tx-faint); font-size: 10px; }.timeline-note b { color: var(--acc-pink-soft); }.timeline-chart { position: relative; display: flex; align-items: end; gap: 7px; height: 120px; padding: 0 6px; }.chart-grid-lines { position: absolute; inset: 0 6px 20px; display: flex; flex-direction: column; justify-content: space-between; }.chart-grid-lines i { display: block; border-top: 1px dashed rgba(var(--line-rgb),.1); }.chart-column { position: relative; z-index: 1; display: flex; flex: 1; height: 100%; flex-direction: column; align-items: center; justify-content: flex-end; }.chart-bar { position: relative; width: min(100%,30px); min-height: 5px; margin-bottom: 15px; border-radius: 6px 6px 2px 2px; background: linear-gradient(180deg,var(--acc-pink-bright),var(--acc-violet) 75%,var(--bar-tip)); opacity: .85; transition: height .25s ease,opacity .2s ease; }.chart-bar:hover { opacity: 1; }.chart-bar span { position: absolute; top: -17px; left: 50%; display: none; color: var(--tx-soft); font-size: 8px; transform: translateX(-50%); white-space: nowrap; }.chart-bar:hover span { display: block; }.chart-column small { position: absolute; bottom: 0; left: 0; right: 0; height: 12px; color: var(--tx-mute); font-size: 8px; text-align: center; }.footer-note { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 15px; color: var(--tx-mute); font-size: 10px; }.clear-button { border: 0; padding: 0; color: var(--tx-mute); background: transparent; cursor: pointer; font-size: 10px; }.clear-button:hover:not(:disabled) { color: var(--acc-pink-soft); }.clear-button:disabled { cursor: not-allowed; opacity: .35; }
