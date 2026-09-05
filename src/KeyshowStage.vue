@@ -577,7 +577,7 @@ onUnmounted(() => {
 .mirror-board { display: flex; gap: 7px; padding: 8px 9px; border-radius: 12px; background: rgba(4, 9, 24, .5); box-shadow: 0 10px 26px rgba(0,0,0,.3), inset 0 0 0 1px rgba(148,163,184,.14); }
 .mirror-main { display: flex; flex-direction: column; gap: 4px; }
 .mirror-row { display: flex; gap: 3px; justify-content: center; }
-.mirror-key { display: grid; place-items: center; width: 25px; height: 19px; border-radius: 4px; color: rgba(226, 232, 240, .5); background: rgba(30, 41, 59, .6); font-size: 7px; font-weight: 700; box-shadow: inset 0 0 0 1px rgba(148,163,184,.1); white-space: nowrap; overflow: hidden; transition: color .08s ease, background .1s ease, box-shadow .1s ease, transform .07s ease; }
+.mirror-key { display: grid; place-items: center; width: 25px; height: 19px; border-radius: 2.5px; color: rgba(226, 232, 240, .5); background: rgba(30, 41, 59, .6); font-size: 7px; font-weight: 700; box-shadow: inset 0 0 0 1px rgba(148,163,184,.1); white-space: nowrap; overflow: hidden; transition: color .08s ease, background .1s ease, box-shadow .1s ease, transform .07s ease; }
 .mirror-key.wide { flex: 1 1 auto; }
 .mirror-key.fn { font-size: 6.5px; }
 .mirror-right-block .mirror-key { width: auto; height: auto; }
@@ -588,7 +588,7 @@ onUnmounted(() => {
   100% { transform: translateY(0) scale(1); filter: brightness(1); }
 }
 .mirror-side { display: flex; gap: 6px; align-items: start; border-left: 1px solid rgba(148,163,184,.14); padding-left: 6px; }
-.mirror-right-block { display: grid; grid-template-rows: repeat(6, 19px); grid-template-columns: repeat(3, 24px); gap: 5px; }
+.mirror-right-block { display: grid; grid-template-rows: repeat(6, 19px); grid-template-columns: repeat(3, 24px); gap: 4px; }
 .mirror-right-block.num { grid-template-columns: repeat(4, 25px); }
 .mirror-chips { display: flex; gap: 4px; max-width: 90%; overflow: hidden; }
 .mirror-chip { padding: 2px 7px; border-radius: 5px; color: #dbe4f3; background: rgba(15, 23, 42, .66); font-size: 10px; font-weight: 700; white-space: nowrap; animation: chip-in .16s ease; }
