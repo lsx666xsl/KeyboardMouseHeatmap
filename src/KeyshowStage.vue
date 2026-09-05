@@ -297,16 +297,19 @@ const mirrorMain: MirrorKey[][] = [
 // beneath them (rows 4-5), numeric keypad on rows 2-6 with true spans.
 type MirrorCell = { id: string; label: string; row: number; col: number; rowspan?: number; colspan?: number };
 const mirrorLeftKeys: MirrorCell[] = [
+  { id: "print-screen", label: "PrtSc", row: 1, col: 1 },
   { id: "insert", label: "Ins", row: 2, col: 1 },
+  { id: "scroll-lock", label: "ScrLk", row: 1, col: 2 },
   { id: "home", label: "Home", row: 2, col: 2 },
+  { id: "pause", label: "Pause", row: 1, col: 3 },
   { id: "page-up", label: "PgUp", row: 2, col: 3 },
   { id: "delete", label: "Del", row: 3, col: 1 },
   { id: "end", label: "End", row: 3, col: 2 },
   { id: "page-down", label: "PgDn", row: 3, col: 3 },
-  { id: "arrow-up", label: "↑", row: 4, col: 2, rowspan: 2 },
-  { id: "arrow-left", label: "←", row: 5, col: 1 },
-  { id: "arrow-down", label: "↓", row: 5, col: 2 },
-  { id: "arrow-right", label: "→", row: 5, col: 3 },
+  { id: "arrow-up", label: "↑", row: 5, col: 2, rowspan: 2 },
+  { id: "arrow-left", label: "←", row: 6, col: 1 },
+  { id: "arrow-down", label: "↓", row: 6, col: 2 },
+  { id: "arrow-right", label: "→", row: 6, col: 3 },
 ];
 const mirrorNumKeys: MirrorCell[] = [
   { id: "num-lock", label: "Num", row: 2, col: 1 },
@@ -573,6 +576,17 @@ onUnmounted(() => {
 /* ---------- mirror keyboard ---------- */
 .mirror-board { display: flex; gap: 7px; padding: 8px 9px; border-radius: 12px; background: rgba(4, 9, 24, .5); box-shadow: 0 10px 26px rgba(0,0,0,.3), inset 0 0 0 1px rgba(148,163,184,.14); }
 .mirror-main { display: flex; flex-direction: column; gap: 4px; }
+.mirror-row { display: flex; gap: 3px; justify-content: center; }
+.mirror-key { display: grid; place-items: center; width: 25px; height: 19px; border-radius: 4px; color: rgba(226, 232, 240, .5); background: rgba(30, 41, 59, .6); font-size: 7.5px; font-weight: 700; box-shadow: inset 0 0 0 1px rgba(148,163,184,.1); transition: color .08s ease, background .1s ease, box-shadow .1s ease, transform .07s ease; }
+.mirror-key.wide { flex: 1 1 auto; }
+.mirror-key.fn { font-size: 6.5px; }
+.mirror-right-block .mirror-key { width: auto; height: auto; }
+.mirror-key.lit { color: #fff; background: linear-gradient(180deg, rgba(var(--cyan-rgb), .95), rgba(var(--violet-rgb), .8)); box-shadow: 0 0 16px rgba(var(--cyan-rgb), .95), inset 0 0 0 1px rgba(255, 255, 255, .4); animation: mirror-press .16s ease-out; }
+@keyframes mirror-press {
+  0% { transform: translateY(1.5px) scale(.92); filter: brightness(1.9); }
+  45% { transform: translateY(0) scale(1.07); filter: brightness(1.4); }
+  100% { transform: translateY(0) scale(1); filter: brightness(1); }
+}
 .mirror-side { display: flex; gap: 6px; align-items: start; border-left: 1px solid rgba(148,163,184,.14); padding-left: 6px; }
 .mirror-right-block { display: grid; grid-template-rows: repeat(6, 19px); grid-template-columns: repeat(3, 24px); gap: 4px; }
 .mirror-right-block.num { grid-template-columns: repeat(4, 25px); }

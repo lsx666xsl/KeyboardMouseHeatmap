@@ -35,7 +35,7 @@ try {
   // Plain-browser preview (`npm run dev`) has no Tauri window.
 }
 
-type KeyItem = { id: string; label: string; count: number; width?: number; muted?: boolean };
+type KeyItem = { id: string; label: string; count: number; width?: number; muted?: boolean; blank?: boolean };
 type MouseStat = { label: string; value: number; color: string };
 type DashboardData = {
   date: string;
@@ -624,14 +624,13 @@ const keyboardRows: KeyItem[][] = [
   [
     ["Esc", 122], ["", 0, 0.55, "gap"], ["F1", 84], ["F2", 96], ["F3", 44], ["F4", 58], ["", 0, 0.45, "gap"],
     ["F5", 278], ["F6", 65], ["F7", 72], ["F8", 51], ["", 0, 0.45, "gap"],
-    ["F9", 40], ["F10", 32], ["F11", 29], ["F12", 20], ["", 0, 0.8, "gap"],
-    ["PrtSc", 12], ["ScrLk", 4], ["Pause", 2],
+    ["F9", 40], ["F10", 32], ["F11", 29], ["F12", 20],
   ].map(([label, count, width, kind]) => ({
-    id: kind === "gap" ? `gap-${label}-${count}-${width}` : String(label),
+    id: kind === "gap" ? `gap-${count}-${width}` : String(label),
     label: String(label),
     count: Number(count),
     width: width ? Number(width) : undefined,
-    muted: kind === "gap" || label === "PrtSc" || label === "ScrLk" || label === "Pause",
+    muted: kind === "gap",
     blank: kind === "gap",
   })),
   [
@@ -657,16 +656,19 @@ const keyboardRows: KeyItem[][] = [
 // keypad on rows 2-6 with true key spans (+/Enter double-height, 0 wide).
 type SideKeySpec = { id: string; label: string; row: number; col: number; rowspan?: number; colspan?: number };
 const leftSideKeys: SideKeySpec[] = [
+  { id: "print-screen", label: "PrtSc", row: 1, col: 1 },
+  { id: "scroll-lock", label: "ScrLk", row: 1, col: 2 },
+  { id: "pause", label: "Pause", row: 1, col: 3 },
   { id: "insert", label: "Ins", row: 2, col: 1 },
   { id: "home", label: "Home", row: 2, col: 2 },
   { id: "page-up", label: "PgUp", row: 2, col: 3 },
   { id: "delete", label: "Del", row: 3, col: 1 },
   { id: "end", label: "End", row: 3, col: 2 },
   { id: "page-down", label: "PgDn", row: 3, col: 3 },
-  { id: "arrow-up", label: "↑", row: 4, col: 2, rowspan: 2 },
-  { id: "arrow-left", label: "←", row: 5, col: 1 },
-  { id: "arrow-down", label: "↓", row: 5, col: 2 },
-  { id: "arrow-right", label: "→", row: 5, col: 3 },
+  { id: "arrow-up", label: "↑", row: 5, col: 2, rowspan: 2 },
+  { id: "arrow-left", label: "←", row: 6, col: 1 },
+  { id: "arrow-down", label: "↓", row: 6, col: 2 },
+  { id: "arrow-right", label: "→", row: 6, col: 3 },
 ];
 const numSideKeys: SideKeySpec[] = [
   { id: "num-lock", label: "Num", row: 2, col: 1 },
@@ -1150,7 +1152,7 @@ onUnmounted(() => {
         <div class="keyboard-wrap">
           <div class="kb-main">
             <div v-for="(row, rowIndex) in keyboardRows" :key="rowIndex" class="keyboard-row">
-              <div v-for="key in row" :key="key.id" class="keycap" :class="[heatLevel(keyCount(key)), { muted: key.muted }]" :style="{ flex: `${key.width ?? 1} 1 0`, '--key-color': heatColor(keyCount(key)) }" :title="`${key.label}：${formatNumber(keyCount(key))} 次`"><span>{{ key.label }}</span><b>{{ formatNumber(keyCount(key)) }}</b></div>
+              <div v-for="key in row" :key="key.id" class="keycap" :class="[heatLevel(keyCount(key)), { muted: key.muted, blank: key.blank }]" :style="{ flex: `${key.width ?? 1} 1 0`, '--key-color': heatColor(keyCount(key)) }" :title="`${key.label}：${formatNumber(keyCount(key))} 次`"><span>{{ key.label }}</span><b>{{ formatNumber(keyCount(key)) }}</b></div>
             </div>
           </div>
           <div class="kb-side">
@@ -1560,7 +1562,7 @@ html[data-theme="starlight"] .ks-radio.active, html[data-theme="latte"] .ks-radi
 .stat-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 14px; margin-bottom: 15px; }.stat-card, .panel { border: 1px solid rgba(var(--line-rgb),.13); background: linear-gradient(145deg,rgba(var(--panel-rgb),.86),rgba(var(--ink-rgb),.9)); box-shadow: 0 20px 50px rgba(0,0,0,.13); }.stat-card { position: relative; min-height: 168px; padding: 22px 23px; overflow: hidden; border-radius: 18px; }.stat-card::after { position: absolute; content: ""; right: -37px; bottom: -45px; width: 135px; height: 135px; border: 1px solid rgba(var(--cyan-rgb),.1); border-radius: 50%; }.stat-card-primary { background: linear-gradient(140deg,rgba(var(--hero-rgb),.97),rgba(var(--panel-rgb),.8)); }.highlight-card { background: linear-gradient(140deg,rgba(var(--pink-rgb),.55),rgba(var(--panel-rgb),.86)); }.card-icon { display: grid; place-items: center; width: 30px; height: 30px; margin-bottom: 19px; border-radius: 9px; font-size: 14px; }.icon-spark { color: var(--acc-amber); background: rgba(var(--amber-rgb),.14); }.icon-mouse { color: var(--acc-cyan); background: rgba(52,217,255,.13); }.icon-time { color: var(--acc-violet); background: rgba(var(--violet-rgb),.14); }.icon-top { color: var(--acc-pink-soft); background: rgba(var(--pink-rgb),.14); }.stat-card p { margin-bottom: 5px; color: var(--tx-dim); font-size: 11px; }.stat-card strong { display: block; margin-bottom: 11px; font-size: 28px; letter-spacing: -.05em; }.unit { margin-left: 2px; color: var(--tx-dim); font-size: 14px; font-weight: 500; letter-spacing: 0; }.trend { font-size: 11px; }.trend small { margin-left: 5px; color: var(--tx-faint); }.trend.up { color: var(--acc-green); }.trend.neutral { color: var(--tx-dim); }.accent-text { color: var(--acc-pink-soft); }
 .content-grid { display: grid; grid-template-columns: minmax(0,1.8fr) minmax(300px,.85fr); gap: 15px; margin-bottom: 15px; }.panel { border-radius: 18px; }.keyboard-panel { container-type: inline-size; padding: 27px 28px 20px; overflow: hidden; }.panel-heading { display: flex; align-items: start; justify-content: space-between; gap: 18px; margin-bottom: 28px; }.panel-heading.compact { align-items: center; margin-bottom: 22px; }.panel h3 { margin: 5px 0 0; font-size: 19px; letter-spacing: -.04em; }.legend { gap: 9px; color: var(--tx-faint); font-size: 10px; }.legend-gradient { display: block; width: 75px; height: 6px; border-radius: 99px; background: linear-gradient(90deg,var(--heat-1),var(--heat-2),var(--heat-3),var(--heat-4),var(--heat-5)); }
 .keyboard-wrap { display: flex; gap: 1.2cqw; padding: 1.6cqw 1.4cqw; border-radius: 1.4cqw; background: rgba(var(--ink-rgb),.42); }.kb-main { display: flex; flex-direction: column; gap: .9cqw; flex: 1 1 auto; min-width: 0; }.keyboard-row { display: flex; gap: .7cqw; min-height: 5.1cqw; }.keycap { display: flex; min-width: 0; flex-direction: column; justify-content: space-between; padding: .9cqw .8cqw .7cqw; border: 1px solid color-mix(in srgb,var(--key-color),white 18%); border-radius: .8cqw; color: #fff; background: linear-gradient(145deg,color-mix(in srgb,var(--key-color),white 9%),var(--key-color)); box-shadow: inset 0 1px rgba(255,255,255,.15),0 5px 10px rgba(0,0,0,.17); transition: transform .18s ease,filter .18s ease; }.keycap:hover { z-index: 2; filter: brightness(1.16); transform: translateY(-4px) scale(1.04); }.keycap span { overflow: hidden; color: rgba(255,255,255,.78); font-size: clamp(6px,1.05cqw,10px); font-weight: 700; text-overflow: ellipsis; }.keycap b { overflow: hidden; font-size: clamp(6px,1.05cqw,10px); font-weight: 700; text-overflow: ellipsis; }.keycap.muted { opacity: .7; }.keycap.blank { opacity: 0; border-color: transparent; box-shadow: none; }.keycap.side { padding: .5cqw .4cqw; border-radius: .6cqw; min-width: 0; }.keycap.side span { font-size: clamp(5.5px,.95cqw,9px); }.keycap.side b { font-size: clamp(5px,.9cqw,8.5px); }.kb-side { display: flex; gap: 1cqw; flex: 0 0 auto; align-items: start; }
-.kb-right-block { display: grid; grid-template-rows: repeat(6, 5.1cqw); grid-template-columns: repeat(3, minmax(3.2cqw, auto)); gap: .5cqw; }
+.kb-right-block { display: grid; grid-template-rows: repeat(6, 5.1cqw); grid-template-columns: repeat(3, minmax(3.2cqw, auto)); gap: .9cqw; }
 .kb-right-block.num { grid-template-columns: repeat(4, minmax(3.4cqw, auto)); }
 .keycap.warm { box-shadow: inset 0 1px rgba(255,255,255,.17),0 5px 14px color-mix(in srgb,var(--key-color),transparent 65%); }.keycap.hot { box-shadow: inset 0 1px rgba(255,255,255,.2),0 6px 18px color-mix(in srgb,var(--key-color),transparent 53%); }.keyboard-footer { justify-content: space-between; margin-top: 18px; color: var(--tx-faint); font-size: 10px; }.keyboard-footer span { display: flex; align-items: center; gap: 8px; }.live-indicator { width: 5px; height: 5px; }
 .side-column { display: flex; flex-direction: column; gap: 15px; }.mouse-panel, .top-keys-panel { padding: 24px 25px; }.panel-kicker { padding: 5px 8px; border-radius: 6px; color: var(--tx-faint); font-size: 9px; }.mouse-content { gap: 20px; align-items: center; }.mouse-shape { position: relative; flex: 0 0 105px; height: 148px; border: 2px solid rgba(var(--violet-rgb),.58); border-radius: 52px 52px 43px 43px; background: linear-gradient(160deg,rgba(52,217,255,.2),rgba(var(--violet-rgb),.14)); transform: rotate(-3deg); }.mouse-top { position: relative; display: flex; height: 85px; overflow: hidden; border-bottom: 1px solid rgba(var(--violet-rgb),.25); border-radius: 50px 50px 0 0; }.mouse-button { position: relative; flex: 1; padding-top: 25px; color: #fff; text-align: center; font-size: 9px; }.mouse-left { border-right: 1px solid rgba(var(--violet-rgb),.25); background: linear-gradient(135deg,rgba(var(--pink-rgb),.82),rgba(var(--pink-rgb),.12)); }.mouse-right { background: linear-gradient(45deg,rgba(var(--violet-rgb),.1),rgba(var(--violet-rgb),.7)); }.mouse-wheel { position: absolute; top: 15px; left: 50%; width: 13px; height: 25px; border: 1px solid rgba(255,255,255,.55); border-radius: 8px; transform: translateX(-50%); }.mouse-wheel i { display: block; width: 3px; height: 8px; margin: 4px auto; border-radius: 3px; background: var(--acc-cyan); }.mouse-side-buttons { position: absolute; top: 65px; right: -8px; display: flex; flex-direction: column; gap: 5px; }.mouse-side-buttons i { width: 9px; height: 20px; border: 1px solid rgba(var(--green-rgb),.65); border-radius: 4px; background: rgba(var(--green-rgb),.35); }.mouse-stats { flex: 1; display: flex; flex-direction: column; gap: 12px; }.mouse-stat { display: grid; grid-template-columns: 7px 1fr auto; align-items: center; gap: 8px; color: var(--tx-dim); font-size: 10px; }.mouse-stat i { width: 6px; height: 6px; border-radius: 50%; }.mouse-stat b { color: var(--tx-strong); font-size: 11px; }.sparkline { color: var(--acc-pink-bright); font-size: 18px; letter-spacing: -5px; }.top-key-list { display: flex; flex-direction: column; gap: 13px; }.top-key-row { display: grid; grid-template-columns: 23px 48px 1fr 44px; align-items: center; gap: 9px; }.rank { color: var(--tx-mute); font-size: 9px; }.top-key-label { color: var(--tx-strong); font-size: 11px; font-weight: 700; }.mini-bar { height: 5px; overflow: hidden; border-radius: 99px; background: var(--bar-track); }.mini-bar i { display: block; height: 100%; border-radius: inherit; }.top-key-row b { color: var(--tx-soft); text-align: right; font-size: 10px; }
