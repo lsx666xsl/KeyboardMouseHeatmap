@@ -120,7 +120,8 @@ onUnmounted(() => document.removeEventListener("keydown", onKeydown));
 </script>
 
 <template>
-  <div class="portal-backdrop" role="dialog" aria-modal="true" aria-label="登录与连接">
+  <div class="portal-page" role="dialog" aria-label="登录与连接">
+    <button class="portal-back" @click="emit('close')">← 返回仪表盘</button>
     <div class="portal-grid" aria-hidden="true"></div>
     <section class="portal-card">
       <button class="portal-close" aria-label="关闭登录界面" @click="emit('close')">×</button>
@@ -193,10 +194,12 @@ onUnmounted(() => document.removeEventListener("keydown", onKeydown));
 </template>
 
 <style scoped>
-.portal-backdrop { position: fixed; z-index: 60; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(var(--veil-rgb), .78); backdrop-filter: blur(14px); }
-.portal-grid { position: absolute; inset: 0; pointer-events: none; opacity: .5; background-image: linear-gradient(rgba(var(--cyan-rgb), .05) 1px, transparent 1px), linear-gradient(90deg, rgba(var(--cyan-rgb), .05) 1px, transparent 1px); background-size: 44px 44px; animation: grid-drift 24s linear infinite; }
+.portal-page { position: relative; display: grid; place-items: start center; padding: 6px 0 26px; }
+.portal-back { position: relative; z-index: 2; justify-self: start; margin: 0 0 10px; padding: 8px 15px; border: 1px solid rgba(var(--line-rgb), .22); border-radius: 999px; color: var(--tx-soft); background: rgba(var(--panel-rgb), .6); cursor: pointer; font-size: 11px; font-weight: 700; transition: all .15s ease; }
+.portal-back:hover { color: var(--text-main); border-color: rgba(var(--cyan-rgb), .65); }
+.portal-grid { position: absolute; inset: -10px 0 0; pointer-events: none; opacity: .5; background-image: linear-gradient(rgba(var(--cyan-rgb), .05) 1px, transparent 1px), linear-gradient(90deg, rgba(var(--cyan-rgb), .05) 1px, transparent 1px); background-size: 44px 44px; animation: grid-drift 24s linear infinite; }
 @keyframes grid-drift { to { background-position: 44px 44px; } }
-.portal-card { position: relative; display: grid; grid-template-columns: 250px 1fr; width: min(100%, 700px); max-height: min(620px, calc(100vh - 48px)); border-radius: 22px; background: linear-gradient(150deg, rgba(var(--panel-rgb), .97), rgba(var(--pop-rgb), .97)); box-shadow: 0 40px 120px rgba(0, 0, 0, .5), inset 0 0 0 1px rgba(var(--line-rgb), .18); overflow: hidden; }
+.portal-card { position: relative; display: grid; grid-template-columns: minmax(210px, 250px) 1fr; width: min(100%, 720px); border-radius: 22px; background: linear-gradient(150deg, rgba(var(--panel-rgb), .97), rgba(var(--pop-rgb), .97)); box-shadow: 0 40px 120px rgba(0, 0, 0, .5), inset 0 0 0 1px rgba(var(--line-rgb), .18); overflow: hidden; }
 .portal-card::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, transparent, var(--acc-cyan), var(--acc-violet), transparent); animation: portal-sweep 3.2s ease infinite; }
 @keyframes portal-sweep { 0% { opacity: .4; } 50% { opacity: 1; } 100% { opacity: .4; } }
 .portal-close { position: absolute; z-index: 2; top: 14px; right: 14px; width: 32px; height: 32px; border: 1px solid rgba(var(--line-rgb), .25); border-radius: 50%; color: var(--tx-soft); background: rgba(var(--ink-rgb), .3); cursor: pointer; font-size: 20px; line-height: 1; }
@@ -213,7 +216,7 @@ onUnmounted(() => document.removeEventListener("keydown", onKeydown));
 .portal-status b { color: var(--tx-strong); }
 .portal-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--tx-mute); }
 .portal-dot.on { background: var(--acc-green); box-shadow: 0 0 10px var(--acc-green); }
-.portal-main { padding: 26px 26px 22px; display: flex; flex-direction: column; gap: 10px; overflow: auto; }
+.portal-main { padding: 24px; display: flex; flex-direction: column; gap: 10px; }
 .portal-tabs { display: flex; gap: 6px; margin-bottom: 6px; }
 .portal-tabs button { flex: 1; padding: 9px 0; border: 1px solid rgba(var(--line-rgb), .2); border-radius: 11px; color: var(--tx-soft); background: rgba(var(--ink-rgb), .25); cursor: pointer; font-size: 12px; font-weight: 700; transition: all .15s ease; }
 .portal-tabs button.active { color: var(--text-main); border-color: rgba(var(--cyan-rgb), .65); background: rgba(var(--cyan-rgb), .12); box-shadow: 0 0 18px rgba(var(--cyan-rgb), .14); }
@@ -242,4 +245,10 @@ onUnmounted(() => document.removeEventListener("keydown", onKeydown));
 .portal-device b { color: var(--tx-strong); font-size: 11px; }
 .portal-device small { color: var(--tx-faint); }
 .portal-device-keys { font-variant-numeric: tabular-nums; color: var(--tx-dim); }
+@media (max-width: 720px) {
+  .portal-card { grid-template-columns: 1fr; }
+  .portal-brand { border-right: none; border-bottom: 1px solid rgba(var(--line-rgb), .16); padding: 22px 20px 16px; }
+  .portal-points { display: none; }
+  .portal-status { margin-top: 14px; }
+}
 </style>
