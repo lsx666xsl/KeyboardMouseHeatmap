@@ -71,7 +71,6 @@ const customEnd = ref(maxSelectableDate);
 const draftStart = ref(customStart.value);
 const draftEnd = ref(customEnd.value);
 const activeRangeLabel = computed(() => activeRange.value === "自定义" ? `${customStart.value} → ${customEnd.value}` : activeRange.value);
-const rangeHeading = computed(() => activeRange.value === "自定义" ? "选定范围" : activeRange.value);
 const recording = ref(true);
 const inputAvailable = ref(false);
 const showPrivacyPanel = ref(false);
@@ -1224,7 +1223,7 @@ onUnmounted(() => {
     </div>
 
     <section class="hero-row">
-      <div><h2>{{ rangeHeading }}的输入节奏</h2></div>
+      <div class="hero-glyphs" aria-hidden="true"><i class="hg-k">✦</i><i class="hg-m">●</i><i class="hg-t">◷</i><i class="hg-c">♛</i></div>
       <div class="range-control">
         <div class="range-switch" role="tablist" aria-label="时间范围">
           <button v-for="range in ranges" :key="range" :class="{ active: activeRange === range }" @click="changeRange(range)">{{ range }}</button><button class="calendar-button" :class="{ active: activeRange === '自定义' }" aria-label="选择日期" :aria-expanded="showDatePicker" @click="toggleDatePicker">▣</button>
@@ -2016,5 +2015,14 @@ html[data-theme="starlight"] .ks-radio.active, html[data-theme="latte"] .ks-radi
 html[data-theme="starlight"] .topbar { box-shadow: 0 12px 30px rgba(0, 0, 0, .08); }
 @media (max-width: 1050px) { .content-grid { grid-template-columns: 1fr; }.side-column { display: grid; grid-template-columns: 1fr 1fr; } }
 @media (max-width: 720px) { .app-shell { padding: 22px 15px; }.topbar { align-items: flex-start; margin-bottom: 58px; }.topbar-actions { gap: 7px; }.demo-chip { display: none; }.hero-row { align-items: flex-start; flex-direction: column; }.range-switch { align-self: stretch; justify-content: space-between; }.range-switch button { flex: 1; }.stat-grid { grid-template-columns: 1fr 1fr; }.stat-card { min-height: 145px; padding: 16px; }.stat-card strong { font-size: 22px; }.side-column { display: flex; }.mouse-content { justify-content: center; }.timeline-panel, .keyboard-panel, .mouse-panel, .top-keys-panel { padding-inline: 17px; }.footer-note { flex-direction: column; gap: 7px; } }
+
+
+/* ---- hero glyph row (patch24): decorative icons replace heading text ---- */
+.hero-glyphs { display: flex; align-items: center; gap: 10px; }
+.hero-glyphs i { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; font-style: normal; font-size: 15px; }
+.hg-k { color: var(--acc-amber); background: rgba(var(--amber-rgb), .14); }
+.hg-m { color: var(--acc-cyan); background: rgba(52, 217, 255, .13); }
+.hg-t { color: var(--acc-violet); background: rgba(var(--violet-rgb), .14); }
+.hg-c { color: var(--acc-pink-soft); background: rgba(var(--pink-rgb), .14); }
 
 </style>
