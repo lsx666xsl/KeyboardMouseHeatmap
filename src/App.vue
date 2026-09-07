@@ -1023,7 +1023,7 @@ onUnmounted(() => {
         <div><h1>Key<span>Pulse</span></h1></div>
       </div>
       <div class="topbar-actions">
-        <div class="demo-chip" :class="{ warning: !demoMode && !inputAvailable, expanded: demoMode || !inputAvailable }" :title="demoMode ? '演示数据（浏览器预览）' : inputAvailable ? '本地实时数据' : '全局输入监听不可用'" aria-label="输入监听状态"><i></i><span v-if="demoMode || !inputAvailable">{{ demoMode ? "演示数据" : "监听不可用" }}</span></div>
+        <div class="demo-chip" :class="{ warning: !demoMode && !inputAvailable }" :title="demoMode ? '演示数据（浏览器预览）' : inputAvailable ? '本地实时数据' : '全局输入监听不可用'"><i></i>{{ demoMode ? "演示数据" : inputAvailable ? "本地实时数据" : "监听不可用" }}</div>
         <div class="keyshow-control">
           <button class="keyshow-button" :class="{ on: keyshowEnabled }" aria-label="按键可视化开/关" :title="keyshowEnabled ? '按键可视化：开（点击关闭）' : '按键可视化：关（点击开启）'" @click="toggleKeyshow"><i>⌨</i><span class="keyshow-led"></span></button>
         </div>
@@ -1185,7 +1185,7 @@ onUnmounted(() => {
             <button v-for="option in themeOptions" :key="option.id" role="option" :aria-selected="themeId === option.id" :class="{ active: themeId === option.id }" class="theme-option" @click="applyTheme(option.id)"><span class="theme-dots"><i v-for="(dot, dotIndex) in option.dots" :key="dotIndex" :style="{ background: dot }"></i></span>{{ option.name }}</button>
           </div>
         </div>
-        <button class="record-button" :class="{ paused: !recording }" :disabled="!demoMode && !inputAvailable" :aria-label="recording ? '正在记录，点击暂停' : '已暂停，点击继续'" :title="!demoMode && !inputAvailable ? '全局输入监听不可用' : recording ? '正在记录 · 点击暂停' : '已暂停 · 点击继续'" @click="toggleRecording"><span class="record-dot"></span></button>
+        <button class="record-button" :class="{ paused: !recording }" :disabled="!demoMode && !inputAvailable" :title="!demoMode && !inputAvailable ? '全局输入监听不可用' : ''" @click="toggleRecording"><span class="record-dot"></span>{{ recording ? "正在记录" : "已暂停" }}</button>
         <div class="account-control">
           <button class="avatar-button" aria-label="账号与连接" :aria-expanded="showAccountPanel" @click="toggleAccountPanel">KP</button>
           <div v-if="showAccountPanel" class="account-popover">
@@ -1224,6 +1224,7 @@ onUnmounted(() => {
     </div>
 
     <section class="hero-row">
+      <div><h2>{{ rangeHeading }}的输入节奏</h2></div>
       <div class="range-control">
         <div class="range-switch" role="tablist" aria-label="时间范围">
           <button v-for="range in ranges" :key="range" :class="{ active: activeRange === range }" @click="changeRange(range)">{{ range }}</button><button class="calendar-button" :class="{ active: activeRange === '自定义' }" aria-label="选择日期" :aria-expanded="showDatePicker" @click="toggleDatePicker">▣</button>
@@ -1239,47 +1240,51 @@ onUnmounted(() => {
     </section>
 
     <section class="stat-grid">
-      <article class="stat-card stat-card-primary" :title="'总按键数 · ' + activeRangeLabel" aria-label="总按键数"><div class="card-icon icon-spark">✦</div><strong>{{ formatNumber(shownKeys) }}</strong></article>
-      <article class="stat-card" :title="'鼠标操作 · ' + activeRangeLabel" aria-label="鼠标操作"><div class="card-icon icon-mouse">●</div><strong>{{ formatNumber(shownMouse) }}</strong></article>
-      <article class="stat-card" title="活跃小时数" aria-label="活跃小时数"><div class="card-icon icon-time">◷</div><strong>{{ activeHours }}<span class="unit">h</span></strong></article>
-      <article class="stat-card highlight-card" title="当前范围冠军按键" aria-label="冠军按键"><div class="card-icon icon-top">♛</div><strong>{{ champion?.label ?? "—" }}</strong><span v-if="champion" class="champ-count">{{ formatNumber(champion.count) }}</span></article>
+      <article class="stat-card stat-card-primary"><div class="card-icon icon-spark">✦</div><p>总按键数</p><strong>{{ formatNumber(shownKeys) }}</strong><span class="trend neutral">{{ activeRangeLabel }}</span></article>
+      <article class="stat-card"><div class="card-icon icon-mouse">●</div><p>鼠标操作</p><strong>{{ formatNumber(shownMouse) }}</strong><span class="trend neutral">{{ activeRangeLabel }}</span></article>
+      <article class="stat-card"><div class="card-icon icon-time">◷</div><p>活跃时段</p><strong>{{ activeHours }}<span class="unit">h</span></strong><span class="trend neutral">有输入的钟点数</span></article>
+      <article class="stat-card highlight-card"><div class="card-icon icon-top">♛</div><p>{{ activeRange === "今天" ? "今日冠军" : "范围冠军" }}</p><strong>{{ champion?.label ?? "暂无" }}</strong><span class="trend accent-text">{{ formatNumber(champion?.count ?? 0) }} 次按下</span></article>
     </section>
 
     <section class="content-grid">
       <article class="panel keyboard-panel">
+        <div class="panel-heading"><h3>键盘热力图</h3><div class="legend"><span class="legend-gradient"></span><small>低</small><small>高</small></div></div>
         <div class="keyboard-wrap">
           <div class="kb-main">
             <div v-for="(row, rowIndex) in keyboardRows" :key="rowIndex" class="keyboard-row">
-              <div v-for="key in row" :key="key.id" class="keycap" :class="[heatLevel(keyCount(key)), { muted: key.muted, blank: key.blank }]" :style="{ flex: `${key.width ?? 1} 1 0`, '--key-color': heatColor(keyCount(key)) }" :title="`${key.label}：${formatNumber(keyCount(key))} 次`"><span>{{ key.label }}</span></div>
+              <div v-for="key in row" :key="key.id" class="keycap" :class="[heatLevel(keyCount(key)), { muted: key.muted, blank: key.blank }]" :style="{ flex: `${key.width ?? 1} 1 0`, '--key-color': heatColor(keyCount(key)) }" :title="`${key.label}：${formatNumber(keyCount(key))} 次`"><span>{{ key.label }}</span><b>{{ formatNumber(keyCount(key)) }}</b></div>
             </div>
           </div>
           <div class="kb-side">
             <div class="kb-right-block">
-              <div v-for="key in leftSideKeys" :key="key.id" class="keycap side" :style="{ gridArea: sideArea(key), '--key-color': heatColor(sideKeyCount(key)) }" :title="`${key.label}：${formatNumber(sideKeyCount(key))} 次`"><span>{{ key.label }}</span></div>
+              <div v-for="key in leftSideKeys" :key="key.id" class="keycap side" :style="{ gridArea: sideArea(key), '--key-color': heatColor(sideKeyCount(key)) }" :title="`${key.label}：${formatNumber(sideKeyCount(key))} 次`"><span>{{ key.label }}</span><b>{{ formatNumber(sideKeyCount(key)) }}</b></div>
             </div>
             <div class="kb-right-block num">
-              <div v-for="key in numSideKeys" :key="key.id" class="keycap side" :style="{ gridArea: sideArea(key), '--key-color': heatColor(sideKeyCount(key)) }" :title="`${key.label}：${formatNumber(sideKeyCount(key))} 次`"><span>{{ key.label }}</span></div>
+              <div v-for="key in numSideKeys" :key="key.id" class="keycap side" :style="{ gridArea: sideArea(key), '--key-color': heatColor(sideKeyCount(key)) }" :title="`${key.label}：${formatNumber(sideKeyCount(key))} 次`"><span>{{ key.label }}</span><b>{{ formatNumber(sideKeyCount(key)) }}</b></div>
             </div>
           </div>
         </div>
+        <div class="keyboard-footer"><span><i class="live-indicator"></i>{{ demoMode ? "界面预览数据" : "数据实时更新中" }}</span><span>按键总量 · {{ formatNumber(totalKeyPresses) }}</span></div>
       </article>
 
       <div class="side-column">
         <article class="panel mouse-panel">
-          <div class="mouse-content"><div class="mouse-shape" aria-label="鼠标模板"><div class="mouse-top"><div class="mouse-button mouse-left"></div><div class="mouse-button mouse-right"></div><div class="mouse-wheel"><i></i></div></div><div class="mouse-side-buttons"><i></i><i></i></div></div><div class="mouse-stats"><div v-for="item in mouseStats" :key="item.label" class="mouse-stat" :title="item.label"><i :style="{ background: item.color }"></i><b>{{ formatNumber(item.value) }}</b></div></div></div>
+          <div class="panel-heading compact"><h3>鼠标热力图</h3><span class="panel-kicker">{{ formatNumber(totalMouseActions) }} 次</span></div>
+          <div class="mouse-content"><div class="mouse-shape" aria-label="鼠标模板"><div class="mouse-top"><div class="mouse-button mouse-left"><span>{{ formatNumber(mouseStats[0].value) }}</span></div><div class="mouse-button mouse-right"><span>{{ formatNumber(mouseStats[1].value) }}</span></div><div class="mouse-wheel"><i></i></div></div><div class="mouse-side-buttons"><i></i><i></i></div></div><div class="mouse-stats"><div v-for="item in mouseStats" :key="item.label" class="mouse-stat"><i :style="{ background: item.color }"></i><span>{{ item.label }}</span><b>{{ formatNumber(item.value) }}</b></div></div></div>
         </article>
         <article class="panel top-keys-panel">
+          <div class="panel-heading compact"><h3>高频按键</h3><span class="sparkline">╱╲╱╲╱╱╲</span></div>
           <div class="top-key-list"><div v-for="(key, index) in topKeys" :key="key.id" class="top-key-row"><span class="rank">0{{ index + 1 }}</span><span class="top-key-label">{{ key.label }}</span><div class="mini-bar"><i :style="{ width: `${(key.count / maxKeyCount) * 100}%`, background: heatColor(key.count) }"></i></div><b>{{ formatNumber(key.count) }}</b></div></div>
         </article>
       </div>
     </section>
 
-    <section class="panel timeline-panel" :title="rangeHeading + ' · 峰值 ' + String(peakHour).padStart(2, '0') + ':00'" aria-label="活跃节奏时间轴"><div class="timeline-chart"><div class="chart-grid-lines"><i></i><i></i><i></i><i></i></div><div v-for="(value, hour) in hourlyActivity" :key="hour" class="chart-column"><div class="chart-bar" :style="{ height: `${value * 0.84}%` }"><span>{{ value }}</span></div><small v-if="hour % 3 === 0">{{ String(hour).padStart(2, "0") }}:00</small></div></div></section>
+    <section class="panel timeline-panel"><div class="panel-heading compact"><h3>一天中的活跃节奏</h3><span class="timeline-note">峰值时段 <b>{{ String(peakHour).padStart(2, "0") }}:00</b></span></div><div class="timeline-chart"><div class="chart-grid-lines"><i></i><i></i><i></i><i></i></div><div v-for="(value, hour) in hourlyActivity" :key="hour" class="chart-column"><div class="chart-bar" :style="{ height: `${value * 0.84}%` }"><span>{{ value }}</span></div><small v-if="hour % 3 === 0">{{ String(hour).padStart(2, "0") }}:00</small></div></div></section>
     <PkDuel v-if="showPkDuel" @close="showPkDuel = false" />
     <DailyCard v-if="showFootprintCard && footprintSnapshot" :snapshot="footprintSnapshot" @close="markFootprintSeen" />
     <Transition name="beat-pop"><i v-if="metronomeOn" :key="beatCount" class="beat-dot"></i></Transition>
     <Transition name="toast-pop"><div v-if="toastMsg" class="achievement-toast" role="status"><span>🏆</span><div><b>成就达成</b><small>{{ toastMsg }}</small></div></div></Transition>
-    <footer class="footer-note"><button class="footer-action" aria-label="清空本地统计数据" title="清空本地统计数据" :disabled="demoMode" @click="clearStats">🗑</button><button class="footer-action" aria-label="每日足迹卡" title="每日足迹卡" @click="openFootprintCard">✦</button><button class="footer-action pk" aria-label="PK 对战" title="PK 对战" @click="showPkDuel = true">⚔</button></footer>
+    <footer class="footer-note"><span>隐私优先 · 只保存聚合统计，不保存输入文本</span><button class="clear-button" :disabled="demoMode" @click="clearStats">清空本地数据</button><button class="footprint-button" @click="openFootprintCard">✦ 足迹卡</button><button class="footprint-button pk-launch" @click="showPkDuel = true">⚔ PK 对战</button></footer>
     </div>
   </main>
 </template>
@@ -2011,21 +2016,5 @@ html[data-theme="starlight"] .ks-radio.active, html[data-theme="latte"] .ks-radi
 html[data-theme="starlight"] .topbar { box-shadow: 0 12px 30px rgba(0, 0, 0, .08); }
 @media (max-width: 1050px) { .content-grid { grid-template-columns: 1fr; }.side-column { display: grid; grid-template-columns: 1fr 1fr; } }
 @media (max-width: 720px) { .app-shell { padding: 22px 15px; }.topbar { align-items: flex-start; margin-bottom: 58px; }.topbar-actions { gap: 7px; }.demo-chip { display: none; }.hero-row { align-items: flex-start; flex-direction: column; }.range-switch { align-self: stretch; justify-content: space-between; }.range-switch button { flex: 1; }.stat-grid { grid-template-columns: 1fr 1fr; }.stat-card { min-height: 145px; padding: 16px; }.stat-card strong { font-size: 22px; }.side-column { display: flex; }.mouse-content { justify-content: center; }.timeline-panel, .keyboard-panel, .mouse-panel, .top-keys-panel { padding-inline: 17px; }.footer-note { flex-direction: column; gap: 7px; } }
-
-/* ---- minimal dashboard (patch22): text-free resting view ----
-   Everything removed above is still reachable via hover :title. */
-.hero-row { justify-content: flex-end; margin-bottom: 24px; }
-.stat-card { display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; }
-.champ-count { margin-top: -6px; color: var(--acc-pink-soft); font-size: 14px; font-weight: 700; }
-.keycap { justify-content: center; }
-.demo-chip { width: 34px; height: 34px; padding: 0; justify-content: center; border-radius: 50%; flex: 0 0 auto; }
-.demo-chip.expanded { width: auto; height: auto; padding: 9px 13px; border-radius: 999px; }
-.record-button { width: 34px; height: 34px; padding: 0; justify-content: center; border-radius: 50%; flex: 0 0 auto; }
-.footer-note { justify-content: flex-end; }
-.footer-action { display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid rgba(var(--line-rgb),.15); border-radius: 50%; background: rgba(var(--panel-rgb),.55); color: var(--tx-soft); cursor: pointer; font-size: 13px; transition: border-color .2s ease, color .2s ease, transform .2s ease; }
-.footer-action:hover:not(:disabled) { border-color: rgba(var(--cyan-rgb),.6); color: #fff; transform: translateY(-1px); }
-.footer-action:disabled { cursor: not-allowed; opacity: .35; }
-.footer-action.pk { color: var(--acc-pink-bright); }
-.mouse-stat b { font-variant-numeric: tabular-nums; }
 
 </style>
