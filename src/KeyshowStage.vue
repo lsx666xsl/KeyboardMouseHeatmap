@@ -72,6 +72,10 @@ let capsuleSeq = 0;
 // after MIRROR_LIT_TTL so the board can never stay stuck lit.
 const litKeys = ref<Record<string, number>>({});
 const MIRROR_LIT_TTL = 4000;
+// mirror mouse: mouse events only arrive as "down", so each button/wheel keeps
+// glowing for a short while after the last press instead of until a keyup.
+const litMouse = ref<Record<string, number>>({});
+const MOUSE_LIT_TTL = 550;
 const recentChips = ref<{ id: number; label: string; kind: string }[]>([]);
 let chipSeq = 0;
 
@@ -238,6 +242,7 @@ function onMirrorEvent(event: KeyShowEvent) {
       litKeys.value = { ...litKeys.value, [event.keyId]: 0 };
     }
   } else if (event.action === "down") {
+    litMouse.value = { ...litMouse.value, [event.keyId]: Date.now() };
     recentChips.value = [
       ...recentChips.value.slice(-11),
       { id: ++chipSeq, label: `🖱 ${event.label}`, kind: event.kind },
@@ -337,14 +342,29 @@ function isKeyLit(keyId: string) {
   const pressedAt = litKeys.value[keyId];
   return !!pressedAt && Date.now() - pressedAt < MIRROR_LIT_TTL;
 }
+function isMouseLit(keyId: string) {
+  const pressedAt = litMouse.value[keyId];
+  return !!pressedAt && Date.now() - pressedAt < MOUSE_LIT_TTL;
+}
+/** Wheel scrolling reports every notch with its own keyId; any recent notch lights the wheel. */
+const WHEEL_IDS = ["wheel-up", "wheel-down", "wheel-left", "wheel-right", "middle-click"];
+function isWheelLit() {
+  return WHEEL_IDS.some(isMouseLit);
+}
 
 function expireStaleLitKeys() {
   const now = Date.now();
-  const stale = Object.entries(litKeys.value).filter(([, ts]) => !!ts && now - ts >= MIRROR_LIT_TTL);
-  if (stale.length) {
+  const staleKeys = Object.entries(litKeys.value).filter(([, ts]) => !!ts && now - ts >= MIRROR_LIT_TTL);
+  if (staleKeys.length) {
     const next = { ...litKeys.value };
-    for (const [keyId] of stale) next[keyId] = 0;
+    for (const [keyId] of staleKeys) next[keyId] = 0;
     litKeys.value = next;
+  }
+  const staleMouse = Object.entries(litMouse.value).filter(([, ts]) => now - ts >= MOUSE_LIT_TTL);
+  if (staleMouse.length) {
+    const next = { ...litMouse.value };
+    for (const [keyId] of staleMouse) delete next[keyId];
+    litMouse.value = next;
   }
 }
 
@@ -499,6 +519,17 @@ onUnmounted(() => {
             <div v-for="key in mirrorNumKeys" :key="key.id" class="mirror-key side" :class="{ lit: isKeyLit(key.id) }" :style="{ gridArea: sideArea(key) }">{{ key.label }}</div>
           </div>
         </div>
+        <div class="mirror-mouse" aria-hidden="true">
+          <div class="mm-shell">
+            <div class="mm-top">
+              <i class="mm-btn mm-left" :class="{ lit: isMouseLit('left-click') }"></i>
+              <i class="mm-btn mm-right" :class="{ lit: isMouseLit('right-click') }"></i>
+            </div>
+            <i class="mm-wheel" :class="{ lit: isWheelLit() }"></i>
+            <i class="mm-side mm-s1" :class="{ lit: isMouseLit('x-button-1') }"></i>
+            <i class="mm-side mm-s2" :class="{ lit: isMouseLit('x-button-2') }"></i>
+          </div>
+        </div>
       </div>
       <div class="mirror-chips">
         <span v-for="chip in recentChips" :key="chip.id" class="mirror-chip">{{ chip.label }}</span>
@@ -588,6 +619,22 @@ onUnmounted(() => {
   100% { transform: translateY(0) scale(1); filter: brightness(1); }
 }
 .mirror-side { display: flex; gap: 6px; align-items: start; border-left: 1px solid rgba(148,163,184,.14); padding-left: 6px; }
+
+/* ---------- mirror mouse (right of the board) ---------- */
+.mirror-mouse { display: flex; align-items: center; padding-left: 10px; border-left: 1px solid rgba(148,163,184,.14); margin-left: 2px; }
+.mm-shell { position: relative; width: 56px; height: 94px; border: 1px solid rgba(148,163,184,.22); border-radius: 26px 26px 15px 15px; background: linear-gradient(180deg, rgba(30,41,59,.78), rgba(15,23,42,.55)); box-shadow: inset 0 0 0 1px rgba(255,255,255,.04); }
+.mm-top { position: absolute; top: 0; left: 0; right: 0; height: 48px; display: flex; gap: 1px; padding: 1px; border-radius: 25px 25px 0 0; overflow: hidden; }
+.mm-btn { flex: 1 1 50%; min-width: 0; border-radius: 24px 24px 5px 5px; background: rgba(30,41,59,.62); box-shadow: inset 0 0 0 1px rgba(148,163,184,.12); transition: background .12s ease, box-shadow .12s ease; }
+.mm-btn.mm-left { border-radius: 24px 0 5px 0; }
+.mm-btn.mm-right { border-radius: 0 24px 0 5px; }
+.mm-wheel { position: absolute; z-index: 2; top: 35px; left: 50%; width: 9px; height: 19px; border-radius: 5px; transform: translateX(-50%); background: rgba(148,163,184,.16); border: 1px solid rgba(148,163,184,.3); transition: background .12s ease, box-shadow .12s ease, border-color .12s ease; }
+.mm-side { position: absolute; left: -8px; width: 11px; height: 21px; border-radius: 4px; background: rgba(30,41,59,.62); box-shadow: inset 0 0 0 1px rgba(148,163,184,.16); transition: background .12s ease, box-shadow .12s ease; }
+.mm-s1 { top: 34px; }
+.mm-s2 { top: 60px; }
+.mm-btn.mm-left.lit { background: linear-gradient(180deg, rgba(var(--pink-rgb), .95), rgba(var(--pink-rgb), .5)); box-shadow: 0 0 14px rgba(var(--pink-rgb), .85), inset 0 0 0 1px rgba(255,255,255,.35); }
+.mm-btn.mm-right.lit { background: linear-gradient(180deg, rgba(var(--violet-rgb), .95), rgba(var(--violet-rgb), .5)); box-shadow: 0 0 14px rgba(var(--violet-rgb), .85), inset 0 0 0 1px rgba(255,255,255,.35); }
+.mm-wheel.lit { background: rgba(var(--cyan-rgb), .95); border-color: rgba(var(--cyan-rgb), .95); box-shadow: 0 0 14px rgba(var(--cyan-rgb), .9); }
+.mm-side.lit { background: rgba(var(--green-rgb), .9); box-shadow: 0 0 12px rgba(var(--green-rgb), .8), inset 0 0 0 1px rgba(255,255,255,.3); }
 .mirror-right-block { display: grid; grid-template-rows: repeat(6, 19px); grid-template-columns: repeat(3, 24px); gap: 4px; }
 .mirror-right-block.num { grid-template-columns: repeat(4, 25px); }
 .mirror-chips { display: flex; gap: 4px; max-width: 90%; overflow: hidden; }

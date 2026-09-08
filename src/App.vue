@@ -678,6 +678,14 @@ const demoMode = ref(true);
 let stopStatsListener: UnlistenFn | undefined;
 let stopRecordingListener: UnlistenFn | undefined;
 
+// Hero decoration: an abstract typing-rhythm wave drawn with theme heat colors.
+// Heights are hand-tuned bursts; the negative delay staggers the shimmer sweep.
+const heroBeat = [
+  16, 24, 18, 30, 40, 26, 20, 34, 48, 30, 22, 26, 38, 56, 66, 40,
+  26, 32, 50, 76, 46, 28, 36, 54, 92, 60, 34, 42, 58, 38, 24, 30,
+  44, 28, 20, 26, 18, 22, 14, 10,
+].map((height, index) => ({ h: height, d: -((index % 14) * 240) }));
+
 const keyboardRows: KeyItem[][] = [
   [
     ["Esc", 122], ["", 0, 0.55, "gap"], ["F1", 84], ["F2", 96], ["F3", 44], ["F4", 58], ["", 0, 0.45, "gap"],
@@ -1224,7 +1232,7 @@ onUnmounted(() => {
     </div>
 
     <section class="hero-row">
-      <div class="hero-glyphs" aria-hidden="true"><i class="hg-k">✦</i><i class="hg-m">●</i><i class="hg-t">◷</i><i class="hg-c">♛</i></div>
+      <div class="hero-wave" aria-hidden="true"><i v-for="(bar, i) in heroBeat" :key="i" :style="{ height: bar.h + '%', animationDelay: bar.d + 'ms' }"></i></div>
       <div class="range-control">
         <div class="range-switch" role="tablist" aria-label="时间范围">
           <button v-for="range in ranges" :key="range" :class="{ active: activeRange === range }" @click="changeRange(range)">{{ range }}</button><button class="calendar-button" :class="{ active: activeRange === '自定义' }" aria-label="选择日期" :aria-expanded="showDatePicker" @click="toggleDatePicker">▣</button>
@@ -2018,12 +2026,11 @@ html[data-theme="starlight"] .topbar { box-shadow: 0 12px 30px rgba(0, 0, 0, .08
 @media (max-width: 720px) { .app-shell { padding: 22px 15px; }.topbar { align-items: flex-start; margin-bottom: 58px; }.topbar-actions { gap: 7px; }.demo-chip { display: none; }.hero-row { align-items: flex-start; flex-direction: column; }.range-switch { align-self: stretch; justify-content: space-between; }.range-switch button { flex: 1; }.stat-grid { grid-template-columns: 1fr 1fr; }.stat-card { min-height: 145px; padding: 16px; }.stat-card strong { font-size: 22px; }.side-column { display: flex; }.mouse-content { justify-content: center; }.timeline-panel, .keyboard-panel, .mouse-panel, .top-keys-panel { padding-inline: 17px; }.footer-note { flex-direction: column; gap: 7px; } }
 
 
-/* ---- hero glyph row (patch24): decorative icons replace heading text ---- */
-.hero-glyphs { display: flex; align-items: center; gap: 10px; }
-.hero-glyphs i { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; font-style: normal; font-size: 15px; }
-.hg-k { color: var(--acc-amber); background: rgba(var(--amber-rgb), .14); }
-.hg-m { color: var(--acc-cyan); background: rgba(52, 217, 255, .13); }
-.hg-t { color: var(--acc-violet); background: rgba(var(--violet-rgb), .14); }
-.hg-c { color: var(--acc-pink-soft); background: rgba(var(--pink-rgb), .14); }
+/* ---- hero beat wave: abstract typing-rhythm bars in theme heat colors ---- */
+.hero-wave { display: flex; align-items: flex-end; gap: 3px; width: min(620px, 46vw); height: 58px; padding: 13px 16px 11px; border: 1px solid rgba(var(--line-rgb), .12); border-radius: 18px; background: linear-gradient(160deg, rgba(var(--panel-rgb), .5), rgba(var(--ink-rgb), .55)); box-shadow: 0 14px 34px rgba(0, 0, 0, .12), inset 0 1px rgba(255, 255, 255, .06); }
+.hero-wave i { flex: 1 1 0; min-width: 0; border-radius: 4px 4px 2px 2px; background: linear-gradient(180deg, var(--heat-5), var(--heat-3) 55%, var(--heat-1)); opacity: .85; box-shadow: 0 0 7px color-mix(in srgb, var(--heat-3) 32%, transparent); transform-origin: center bottom; animation: hero-beat 2.8s ease-in-out infinite; }
+@keyframes hero-beat { 0%, 100% { transform: scaleY(.94); } 50% { transform: scaleY(1.04); } }
+@media (prefers-reduced-motion: reduce) { .hero-wave i { animation: none; } }
+@media (max-width: 720px) { .hero-wave { width: 100%; } }
 
 </style>
