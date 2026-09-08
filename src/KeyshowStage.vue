@@ -16,7 +16,7 @@ const MOD_KEYS = new Set([
   "shift-left", "shift-right", "win-left", "win-right", "menu",
 ]);
 
-type StyleMode = "capsule" | "particle" | "mirror" | "ring" | "firework" | "spring";
+type StyleMode = "capsule" | "particle" | "mirror" | "ring" | "firework" | "spring" | "laser" | "atom" | "bubble";
 const mode = ref<StyleMode>((localStorage.getItem("keypulse-keyshow-style") as StyleMode) || "capsule");
 const showHint = ref(true);
 // The window is resized by the host (small/medium/large); content scales to match
@@ -96,8 +96,42 @@ let popSeq = 0;
 const springs = ref<Ring[]>([]);
 let springSeq = 0;
 
+// creative extras: rising neon scan beams, orbiting-atom pops, glass bubbles
+type Beam = { id: number; label: string; dx: number };
+const beams = ref<Beam[]>([]);
+let beamSeq = 0;
+const atoms = ref<Ring[]>([]);
+let atomSeq = 0;
+type Bubble = { id: number; label: string; dx: number; delay: number };
+const bubbles = ref<Bubble[]>([]);
+let bubbleSeq = 0;
+
 function dropAfter(millis: number, fn: () => void) {
   setTimeout(fn, millis);
+}
+
+function onLaserEvent(event: KeyShowEvent) {
+  if (event.action !== "down") return;
+  const id = ++beamSeq;
+  beams.value = [...beams.value.slice(-2), { id, label: event.label, dx: ((id % 5) - 2) * 92 }];
+  dropAfter(1000, () => { beams.value = beams.value.filter((beam) => beam.id !== id); });
+}
+
+function onAtomEvent(event: KeyShowEvent) {
+  if (event.action !== "down") return;
+  const id = ++atomSeq;
+  atoms.value = [...atoms.value.slice(-1), { id, label: event.label }];
+  dropAfter(1400, () => { atoms.value = atoms.value.filter((atom) => atom.id !== id); });
+}
+
+function onBubbleEvent(event: KeyShowEvent) {
+  if (event.action !== "down") return;
+  const id = ++bubbleSeq;
+  bubbles.value = [
+    ...bubbles.value.slice(-5),
+    { id, label: event.label, dx: ((id % 5) - 2) * 48, delay: (id % 4) * 90 },
+  ];
+  dropAfter(1700, () => { bubbles.value = bubbles.value.filter((b) => b.id !== id); });
 }
 
 function onRingEvent(event: KeyShowEvent) {
@@ -272,6 +306,9 @@ function routeEvent(event: KeyShowEvent) {
   onRingEvent(event);
   onPopEvent(event);
   onSpringEvent(event);
+  onLaserEvent(event);
+  onAtomEvent(event);
+  onBubbleEvent(event);
 }
 
 // ---------- mirror keyboard layout: full 104 keys (ANSI) ----------
@@ -503,6 +540,31 @@ onUnmounted(() => {
       <div v-for="spring in springs" :key="spring.id" class="fx-spring"><span>{{ spring.label }}</span></div>
     </div>
 
+    <!-- 霓虹扫描：水平光束自键名处向上扫过 -->
+    <div v-if="mode === 'laser'" class="fx-stage" aria-hidden="true">
+      <div v-for="beam in beams" :key="beam.id" class="fx-laser" :style="{ '--dx': beam.dx + 'px' }">
+        <span class="fx-laser-label">{{ beam.label }}</span>
+        <i class="fx-laser-beam"></i>
+      </div>
+    </div>
+
+    <!-- 原子跃迁：键名如原子核，电子沿轨道环绕 -->
+    <div v-if="mode === 'atom'" class="fx-stage" aria-hidden="true">
+      <div v-for="atom in atoms" :key="atom.id" class="fx-atom">
+        <span class="fx-atom-label">{{ atom.label }}</span>
+        <i class="fx-orbit"><b></b></i>
+        <i class="fx-orbit o2"><b></b></i>
+        <i class="fx-orbit o3"><b></b></i>
+      </div>
+    </div>
+
+    <!-- 气泡升腾：玻璃气泡托着键名上飘 -->
+    <div v-if="mode === 'bubble'" class="fx-stage" aria-hidden="true">
+      <div v-for="bubble in bubbles" :key="bubble.id" class="fx-bubble" :style="{ '--dx': bubble.dx + 'px', animationDelay: bubble.delay + 'ms' }">
+        <span>{{ bubble.label }}</span>
+      </div>
+    </div>
+
     <!-- 迷你键盘镜像（104 全键位） -->
     <div v-if="mode === 'mirror'" class="mirror-stage" aria-hidden="true">
       <div class="mirror-board">
@@ -526,8 +588,8 @@ onUnmounted(() => {
               <i class="mm-btn mm-right" :class="{ lit: isMouseLit('right-click') }"></i>
             </div>
             <i class="mm-wheel" :class="{ lit: isWheelLit() }"></i>
-            <i class="mm-side mm-s1" :class="{ lit: isMouseLit('x-button-1') }"></i>
-            <i class="mm-side mm-s2" :class="{ lit: isMouseLit('x-button-2') }"></i>
+            <i class="mm-side mm-s1" :class="{ lit: isMouseLit('x-button-2') }"></i>
+            <i class="mm-side mm-s2" :class="{ lit: isMouseLit('x-button-1') }"></i>
           </div>
         </div>
       </div>
@@ -604,6 +666,30 @@ onUnmounted(() => {
 .fx-spring { position: absolute; left: 50%; bottom: 34px; display: grid; place-items: center; min-width: 64px; height: 44px; padding: 0 12px; border-radius: 12px; color: #fff; font-weight: 900; font-size: 20px; background: linear-gradient(160deg, rgba(var(--violet-rgb), .85), rgba(var(--cyan-rgb), .75)); box-shadow: 0 8px 24px rgba(var(--cyan-rgb), .35); animation: spring-bounce .75s cubic-bezier(.2, 1.6, .4, 1) forwards; }
 @keyframes spring-bounce { 0% { transform: translate(-50%, 0) scaleY(.6); opacity: 0; } 16% { opacity: 1; transform: translate(-50%, -78px) scaleY(1.05); } 34% { transform: translate(-50%, 0) scaleY(.94); } 52% { transform: translate(-50%, -40px) scaleY(1); } 70% { transform: translate(-50%, 0) scaleY(.97); } 100% { transform: translate(-50%, -8px) scaleY(.9); opacity: 0; } }
 
+/* ---------- neon scan beam ---------- */
+.fx-laser { position: absolute; left: calc(50% + var(--dx)); bottom: 40px; display: flex; flex-direction: column; align-items: center; }
+.fx-laser-label { color: #fff; font-weight: 900; font-size: 26px; text-shadow: 0 0 16px rgba(var(--cyan-rgb), 1), 0 0 34px rgba(var(--violet-rgb), .9); animation: laser-label .95s ease-out forwards; }
+@keyframes laser-label { 0% { opacity: 0; transform: scale(.4); } 12% { opacity: 1; transform: scale(1.14); } 24% { transform: scale(1); } 70% { opacity: 1; } 100% { opacity: 0; transform: scale(.9); } }
+.fx-laser-beam { position: absolute; bottom: -30px; left: 50%; width: 340px; height: 5px; margin-left: -170px; border-radius: 99px; background: linear-gradient(90deg, transparent, rgba(var(--cyan-rgb), .95) 28%, #fff 50%, rgba(var(--violet-rgb), .95) 72%, transparent); box-shadow: 0 0 16px rgba(var(--cyan-rgb), .85); animation: beam-scan .95s ease-in forwards; }
+@keyframes beam-scan { 0% { transform: translateY(0) scaleX(.25); opacity: 0; } 10% { opacity: 1; } 28% { transform: translateY(-10px) scaleX(1); } 100% { transform: translateY(-124px) scaleX(.85); opacity: 0; } }
+
+/* ---------- orbiting atom ---------- */
+.fx-atom { position: absolute; left: 50%; bottom: 6px; width: 230px; height: 150px; margin-left: -115px; opacity: 0; animation: atom-fade 1.4s ease-out forwards; }
+@keyframes atom-fade { 0% { opacity: 0; } 10% { opacity: 1; } 72% { opacity: 1; } 100% { opacity: 0; } }
+.fx-atom-label { position: absolute; left: 50%; top: 50%; color: #fff; font-weight: 900; font-size: 25px; transform: translate(-50%, -50%); text-shadow: 0 0 14px rgba(var(--pink-rgb), 1), 0 0 30px rgba(var(--pink-rgb), .6); animation: atom-pop .42s cubic-bezier(.2, 1.6, .4, 1); }
+@keyframes atom-pop { from { transform: translate(-50%, -50%) scale(.2); opacity: 0; } to { transform: translate(-50%, -50%) scale(1); } }
+.fx-orbit { position: absolute; left: 50%; top: 50%; width: 216px; height: 70px; margin: -35px 0 0 -108px; border: 1px solid rgba(var(--cyan-rgb), .45); border-radius: 50%; animation: orbit-spin 1.9s linear infinite; }
+.fx-orbit b { position: absolute; left: 50%; top: -4px; width: 8px; height: 8px; margin-left: -4px; border-radius: 50%; background: var(--acc-cyan); box-shadow: 0 0 12px var(--acc-cyan); }
+.fx-orbit.o2 { border-color: rgba(var(--violet-rgb), .5); animation-duration: 2.6s; animation-direction: reverse; animation-delay: -.7s; }
+.fx-orbit.o2 b { background: var(--acc-violet); box-shadow: 0 0 12px var(--acc-violet); }
+.fx-orbit.o3 { border-color: rgba(var(--amber-rgb), .5); animation-duration: 3.4s; animation-delay: -1.4s; }
+.fx-orbit.o3 b { background: var(--acc-amber); box-shadow: 0 0 12px var(--acc-amber); }
+@keyframes orbit-spin { to { transform: rotate(360deg); } }
+
+/* ---------- glass bubble ---------- */
+.fx-bubble { position: absolute; left: calc(50% + var(--dx)); bottom: 24px; display: grid; place-items: center; width: 62px; height: 62px; margin-left: -31px; border: 1px solid rgba(255, 255, 255, .4); border-radius: 50%; color: #fff; font-weight: 900; font-size: 14px; text-shadow: 0 1px 3px rgba(0, 0, 0, .5); background: radial-gradient(circle at 32% 26%, rgba(255, 255, 255, .6), rgba(var(--cyan-rgb), .12) 42%, rgba(var(--violet-rgb), .32)); box-shadow: 0 0 18px rgba(var(--cyan-rgb), .3), inset -4px -6px 12px rgba(var(--violet-rgb), .35); animation: bubble-rise 1.6s cubic-bezier(.25, .6, .45, 1) forwards; }
+@keyframes bubble-rise { 0% { transform: translateY(0) scale(.6); opacity: 0; } 10% { transform: translateY(-10px) scale(1); opacity: 1; } 30% { transform: translateY(-34px); } 55% { transform: translateY(-66px); } 78% { transform: translateY(-100px); opacity: .92; } 100% { transform: translateY(-132px) scale(1.14); opacity: 0; } }
+
 /* ---------- mirror keyboard ---------- */
 .mirror-board { display: flex; gap: 7px; padding: 8px 9px; border-radius: 12px; background: rgba(4, 9, 24, .5); box-shadow: 0 10px 26px rgba(0,0,0,.3), inset 0 0 0 1px rgba(148,163,184,.14); }
 .mirror-main { display: flex; flex-direction: column; gap: 4px; }
@@ -628,13 +714,13 @@ onUnmounted(() => {
 .mm-btn.mm-left { border-radius: 24px 0 5px 0; }
 .mm-btn.mm-right { border-radius: 0 24px 0 5px; }
 .mm-wheel { position: absolute; z-index: 2; top: 35px; left: 50%; width: 9px; height: 19px; border-radius: 5px; transform: translateX(-50%); background: rgba(148,163,184,.16); border: 1px solid rgba(148,163,184,.3); transition: background .12s ease, box-shadow .12s ease, border-color .12s ease; }
-.mm-side { position: absolute; left: -8px; width: 11px; height: 21px; border-radius: 4px; background: rgba(30,41,59,.62); box-shadow: inset 0 0 0 1px rgba(148,163,184,.16); transition: background .12s ease, box-shadow .12s ease; }
-.mm-s1 { top: 34px; }
+.mm-side { position: absolute; left: -5px; width: 8px; height: 14px; border-radius: 3px; background: rgba(30, 41, 59, .55); box-shadow: inset 0 0 0 1px rgba(148, 163, 184, .14); transition: background .12s ease, box-shadow .12s ease; opacity: .9; }
+.mm-s1 { top: 38px; }
 .mm-s2 { top: 60px; }
 .mm-btn.mm-left.lit { background: linear-gradient(180deg, rgba(var(--pink-rgb), .95), rgba(var(--pink-rgb), .5)); box-shadow: 0 0 14px rgba(var(--pink-rgb), .85), inset 0 0 0 1px rgba(255,255,255,.35); }
 .mm-btn.mm-right.lit { background: linear-gradient(180deg, rgba(var(--violet-rgb), .95), rgba(var(--violet-rgb), .5)); box-shadow: 0 0 14px rgba(var(--violet-rgb), .85), inset 0 0 0 1px rgba(255,255,255,.35); }
 .mm-wheel.lit { background: rgba(var(--cyan-rgb), .95); border-color: rgba(var(--cyan-rgb), .95); box-shadow: 0 0 14px rgba(var(--cyan-rgb), .9); }
-.mm-side.lit { background: rgba(var(--green-rgb), .9); box-shadow: 0 0 12px rgba(var(--green-rgb), .8), inset 0 0 0 1px rgba(255,255,255,.3); }
+.mm-side.lit { background: rgba(var(--green-rgb), .9); box-shadow: 0 0 8px rgba(var(--green-rgb), .75), inset 0 0 0 1px rgba(255, 255, 255, .3); }
 .mirror-right-block { display: grid; grid-template-rows: repeat(6, 19px); grid-template-columns: repeat(3, 24px); gap: 4px; }
 .mirror-right-block.num { grid-template-columns: repeat(4, 25px); }
 .mirror-chips { display: flex; gap: 4px; max-width: 90%; overflow: hidden; }

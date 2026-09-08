@@ -565,6 +565,9 @@ const keyshowOptions = [
   { id: "ring", name: "波纹扩散", icon: "◎", desc: "同心圆涟漪 + 键名" },
   { id: "firework", name: "烟花爆裂", icon: "✺", desc: "彩色火花四溅" },
   { id: "spring", name: "弹性蹦跳", icon: "⬢", desc: "键块落地回弹" },
+  { id: "laser", name: "霓虹扫描", icon: "⚡", desc: "光束上扫 · 键名点亮" },
+  { id: "atom", name: "原子跃迁", icon: "⚛", desc: "电子环绕 · 轨道旋转" },
+  { id: "bubble", name: "气泡升腾", icon: "◌", desc: "玻璃气泡 · 上飘消散" },
   { id: "mirror", name: "迷你键盘", icon: "⌨", desc: "实时点亮 + 记录条" },
 ];
 let stopKeyshowChangedListener: UnlistenFn | undefined;
