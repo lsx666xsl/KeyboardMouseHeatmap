@@ -499,10 +499,10 @@ onUnmounted(() => {
             <div v-for="key in mirrorNumKeys" :key="key.id" class="mirror-key side" :class="{ lit: isKeyLit(key.id) }" :style="{ gridArea: sideArea(key) }">{{ key.label }}</div>
           </div>
         </div>
+      </div>
       <div class="mirror-chips">
         <span v-for="chip in recentChips" :key="chip.id" class="mirror-chip">{{ chip.label }}</span>
       </div>
-    </div>
     </div>
   </div>
   </div>
