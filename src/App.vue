@@ -10,6 +10,7 @@ import { configureSound, loadCustomSound, playKeySound, playMetronomeTick, type 
 import DailyCard from "./DailyCard.vue";
 import PkDuel from "./PkDuel.vue";
 import LoginPortal from "./LoginPortal.vue";
+import { initUpdater } from "./updater";
 
 // ============================================================
 // KeyPulse main dashboard window.
@@ -973,6 +974,7 @@ onMounted(async () => {
     connectToRuntime();
     wireSoundFx();
     cloudSyncToday();
+    initUpdater();
     cloudSyncTimer = setInterval(cloudSyncToday, 30_000);
     const storedCustom = localStorage.getItem("keypulse-custom-sound");
     if (soundVoice.value === "custom" && storedCustom) {

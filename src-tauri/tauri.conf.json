@@ -23,6 +23,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "useLocalToolsDir": true,
     "targets": "all",
     "icon": [
@@ -32,5 +33,16 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU5MjdCRDA5QTQ2NzI4RUIKUldUcktHZWtDYjBuNmM4U0YzTm92MGZpNXpSRkg3S0lVaUU4ajIybk5sYms2dC93MGVhVnpqR3gK",
+      "endpoints": [
+        "https://github.com/lsx666xsl/KeyboardMouseHeatmap/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

@@ -1037,6 +1037,7 @@ pub fn run() {
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             get_dashboard,
             get_dashboard_custom,
@@ -1109,10 +1110,11 @@ fn setup_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let toggle = MenuItemBuilder::with_id("toggle-recording", "暂停/继续记录").build(app)?;
     let keyshow = MenuItemBuilder::with_id("toggle-keyshow", "按键可视化：关").build(app)?;
     let clear = MenuItemBuilder::with_id("clear-stats", "清空本地统计").build(app)?;
+    let check_update = MenuItemBuilder::with_id("check-update", "检查更新").build(app)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let quit = PredefinedMenuItem::quit(app, Some("退出 KeyPulse"))?;
     let menu = MenuBuilder::new(app)
-        .items(&[&show, &toggle, &keyshow, &clear, &separator, &quit])
+        .items(&[&show, &toggle, &keyshow, &clear, &check_update, &separator, &quit])
         .build()?;
 
     let mut tray = TrayIconBuilder::with_id("keypulse-tray")
@@ -1167,6 +1169,13 @@ fn setup_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                     }
+                }
+                "check-update" => {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
+                    let _ = app.emit("check-update", ());
                 }
                 _ => {}
             }
