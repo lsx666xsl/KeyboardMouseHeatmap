@@ -240,7 +240,7 @@ onUnmounted(() => document.removeEventListener("keydown", onKeydown));
 .portal-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--tx-mute); }
 .portal-dot.on { background: var(--acc-green); box-shadow: 0 0 10px var(--acc-green); }
 .portal-main { padding: 24px; display: flex; flex-direction: column; gap: 10px; }
-.portal-tabs { display: flex; gap: 6px; margin-bottom: 6px; }
+.portal-tabs { display: flex; gap: 6px; margin-bottom: 6px; padding-right: 30px; }
 .portal-tabs button { flex: 1; padding: 9px 0; border: 1px solid rgba(var(--line-rgb), .2); border-radius: 11px; color: var(--tx-soft); background: rgba(var(--ink-rgb), .25); cursor: pointer; font-size: 12px; font-weight: 700; transition: all .15s ease; }
 .portal-tabs button.active { color: var(--text-main); border-color: rgba(var(--cyan-rgb), .65); background: rgba(var(--cyan-rgb), .12); box-shadow: 0 0 18px rgba(var(--cyan-rgb), .14); }
 .portal-pane { display: flex; flex-direction: column; gap: 9px; }
