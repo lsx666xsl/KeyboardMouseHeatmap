@@ -47,7 +47,7 @@ jobs:
             更新统一走 NSIS 用户级静默安装（免管理员权限）。老用户下次启动（或托盘“检查更新”）会自动提示升级。
 
             **首次运行提示**：安装包未做代码签名，浏览器手动下载后首次运行如遇 Windows SmartScreen 蓝色提示，属未签名程序的正常现象——点「更多信息」→「仍要运行」即可；应用内自动更新不触发任何提示。
-            **完整性校验**：附件 `checksums-sha256.txt` 内含安装包与 latest.json 的 SHA-256，可用 `certutil -hashfile 文件名 SHA256`（Windows）或 `sha256sum`（macOS/Linux）比对。
+            **完整性校验**：附件 `checksums-sha256.txt` 内含安装包的 SHA-256，可用 `certutil -hashfile 文件名 SHA256`（Windows）或 `sha256sum`（macOS/Linux）比对。
           releaseDraft: false
           prerelease: false
 
@@ -57,8 +57,10 @@ jobs:
         shell: pwsh
         run: |
           $dir = "src-tauri/target/release/bundle/nsis"
+          $files = Get-ChildItem "$dir/*-setup.exe"
+          if (-not $files) { throw "no setup.exe found in $dir" }
           if (Test-Path "checksums-sha256.txt") { Remove-Item "checksums-sha256.txt" }
-          Get-ChildItem "$dir/*-setup.exe", "$dir/latest.json" | ForEach-Object {
+          $files | ForEach-Object {
             $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
             Add-Content -Path "checksums-sha256.txt" -Value "$hash  $($_.Name)"
           }
