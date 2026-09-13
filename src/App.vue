@@ -11,6 +11,7 @@ import DailyCard from "./DailyCard.vue";
 import PkDuel from "./PkDuel.vue";
 import LoginPortal from "./LoginPortal.vue";
 import { initUpdater } from "./updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 
 // ============================================================
 // KeyPulse main dashboard window.
@@ -552,9 +553,13 @@ async function refreshDataInfo() {
 }
 
 async function migrateData(kind: string) {
-  dataLocation.value = kind;
   try {
-    dataNotice.value = await invoke<string>("set_data_location", { kind });
+    const notice = await invoke<string>("set_data_location", { kind });
+    dataLocation.value = kind;
+    dataNotice.value = notice;
+    if (window.confirm(`${notice}\n\n立即重启应用使新数据位置生效吗？`)) {
+      await relaunch();
+    }
   } catch (error) {
     dataNotice.value = String(error);
   }

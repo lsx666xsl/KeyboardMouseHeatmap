@@ -391,7 +391,16 @@ fn write_data_location(app: &impl tauri::Manager<tauri::Wry>, kind: &str) -> Res
     if let Some(parent) = file.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    let value = serde_json::json!({ "dataLocation": kind });
+    // Read-modify-write so the other preference keys (profiles, appBehavior)
+    // survive the change.
+    let mut value = std::fs::read_to_string(&file)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    if !value.is_object() {
+        value = serde_json::json!({});
+    }
+    value["dataLocation"] = serde_json::json!(kind);
     std::fs::write(&file, serde_json::to_string_pretty(&value).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())
 }
@@ -446,8 +455,17 @@ fn set_data_location(app: tauri::AppHandle, kind: String) -> Result<String, Stri
     };
     std::fs::create_dir_all(&target_dir).map_err(|e| e.to_string())?;
     let target = target_dir.join("keypulse.sqlite");
-    if current != target {
-        if !target.exists() && current.exists() {
+    if current == target {
+        let dir = target.parent().map(|p| p.display().to_string()).unwrap_or_default();
+        return Ok(format!("数据已经在此位置：{dir}\\keypulse.sqlite"));
+    }
+    let mut notice = String::new();
+    if current.exists() {
+        if target.exists() {
+            // Keep whatever data already lives at the target; never silently
+            // overwrite it with the old location's copy.
+            notice = "目标位置已存在数据库，切换后将使用该位置的现有数据（旧位置文件原样保留）。".to_string();
+        } else {
             for suffix in ["", "-wal", "-shm"] {
                 let src = std::path::PathBuf::from(format!("{}{}", current.display(), suffix));
                 if src.exists() {
@@ -455,11 +473,15 @@ fn set_data_location(app: tauri::AppHandle, kind: String) -> Result<String, Stri
                         .map_err(|e| format!("copy failed: {e}"))?;
                 }
             }
+            // The old copies are kept in place as a backup: the running store
+            // still holds them open (writes land there until the next launch),
+            // and they must not look deleted to the user.
+            notice = "旧位置的数据已完整迁移到新位置（旧文件原样保留作为备份）。".to_string();
         }
-        write_data_location(&app, &kind)?;
     }
+    write_data_location(&app, &kind)?;
     let dir = target.parent().map(|p| p.display().to_string()).unwrap_or_default();
-    Ok(format!("数据位置已切换为：{dir}\\keypulse.sqlite（重启后生效）"))
+    Ok(format!("{notice}数据位置已切换为：{dir}\\keypulse.sqlite（重启后生效）"))
 }
 
 /// Save a base64 PNG (from the footprint card canvas) under
@@ -1038,6 +1060,7 @@ pub fn run() {
         })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             get_dashboard,
             get_dashboard_custom,
